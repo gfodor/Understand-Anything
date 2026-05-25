@@ -13,16 +13,20 @@ import type {
 /**
  * Full-screen modal reader for a Walkthrough.
  *
- * Layout: scrolling prose on the left, sticky code pane on the right.
- * As scenes scroll past, the right pane cross-fades to the active
- * scene's code excerpt — same pattern as the standalone HTML
- * walkthroughs in ~/portal/vignettes/.
+ * Styled to the Understand-Anything theme: deep matte ink with a single
+ * warm-tan accent (--color-accent #d4a574). DM Serif Display headings,
+ * Inter body, JetBrains Mono code. The active scene is marked by a tan
+ * left rule + a faint accent overlay; the climactic scene gets tan
+ * hairlines above and below the pull-quote.
  *
- * Source is fetched live via /file-content.json (sliced to lineRange).
- * The fetch is cached per file path; we never re-fetch the same source.
+ * Layout: scrolling prose on the left, sticky code pane on the right.
+ * The active scene is hoverSceneId ?? scrollSceneId; the active excerpt
+ * is the scene's codeExcerpt or, for prose-only scenes, the nearest
+ * preceding scene's. Excerpts cross-fade in the right pane.
+ *
+ * Source is fetched live via /file-content.json and sliced to lineRange.
  */
 
-// Resolve the same access token the app uses for /knowledge-graph.json etc.
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 const SESSION_TOKEN_KEY = "understand-anything-token";
 
@@ -53,7 +57,6 @@ export function WalkthroughReader() {
   const close = useDashboardStore((s) => s.closeWalkthrough);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Escape key closes
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -63,7 +66,6 @@ export function WalkthroughReader() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, close]);
 
-  // Reset scroll on each new walkthrough
   useEffect(() => {
     if (open && scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = 0;
@@ -78,10 +80,13 @@ export function WalkthroughReader() {
       aria-modal="true"
       aria-label={`Walkthrough: ${walkthrough.title}`}
       onClick={close}
+      className="walkthrough-backdrop"
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(15, 18, 22, 0.82)",
+        background: "rgba(5, 5, 5, 0.86)",
+        backdropFilter: "blur(6px)",
+        WebkitBackdropFilter: "blur(6px)",
         zIndex: 1000,
         display: "flex",
         alignItems: "stretch",
@@ -92,18 +97,20 @@ export function WalkthroughReader() {
       <div
         ref={scrollContainerRef}
         onClick={(e) => e.stopPropagation()}
+        className="walkthrough-modal"
         style={{
-          background: "var(--paper, #f9f4e7)",
-          color: "var(--ink, #1c1611)",
+          background: "var(--color-root)",
+          color: "var(--color-text-primary)",
           width: "min(1680px, calc(100vw - 32px))",
           height: "100%",
-          borderRadius: "4px",
-          boxShadow: "0 24px 80px rgba(0,0,0,0.4)",
+          borderRadius: "8px",
+          border: "1px solid var(--color-border-subtle)",
+          boxShadow:
+            "0 32px 96px rgba(0,0,0,0.6), 0 0 0 1px rgba(212, 165, 116, 0.04)",
           overflowY: "auto",
           overflowX: "hidden",
-          fontFamily:
-            '"Source Serif 4", "Source Serif Pro", Georgia, serif',
-          lineHeight: 1.62,
+          fontFamily: "var(--font-sans)",
+          lineHeight: 1.6,
           position: "relative",
         }}
       >
@@ -127,23 +134,33 @@ function CloseButton({ onClose }: { onClose: () => void }) {
       aria-label="Close walkthrough"
       style={{
         position: "sticky",
-        top: "12px",
-        left: "calc(100% - 60px)",
+        top: "16px",
+        left: "calc(100% - 56px)",
         marginLeft: "auto",
-        marginRight: "12px",
+        marginRight: "16px",
         zIndex: 10,
-        background: "rgba(28, 22, 17, 0.85)",
-        color: "#f9f4e7",
-        border: "none",
-        borderRadius: "20px",
-        width: "36px",
-        height: "36px",
+        background: "var(--glass-bg-heavy)",
+        color: "var(--color-text-secondary)",
+        border: "1px solid var(--color-border-subtle)",
+        borderRadius: "999px",
+        width: "32px",
+        height: "32px",
         cursor: "pointer",
-        fontSize: "18px",
-        fontFamily: "inherit",
+        fontSize: "16px",
+        fontFamily: "var(--font-mono)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        backdropFilter: "blur(8px)",
+        transition: "color 160ms ease, border-color 160ms ease",
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.color = "var(--color-accent)";
+        (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--color-border-medium)";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.color = "var(--color-text-secondary)";
+        (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--color-border-subtle)";
       }}
     >
       ×
@@ -155,30 +172,35 @@ function Masthead({ walkthrough }: { walkthrough: Walkthrough }) {
   return (
     <header
       style={{
-        padding: "48px 64px 24px",
-        borderBottom: "1px solid var(--rule, #d5c7a4)",
-        maxWidth: "880px",
+        padding: "56px 56px 32px",
+        borderBottom: "1px solid var(--color-border-subtle)",
+        maxWidth: "1020px",
+        position: "relative",
       }}
     >
       <h1
         style={{
-          fontSize: "clamp(2.4rem, 5vw, 3.6rem)",
-          lineHeight: 0.98,
-          letterSpacing: "-0.02em",
-          fontWeight: 600,
-          margin: "0 0 16px",
+          fontFamily: "var(--font-heading)",
+          fontSize: "clamp(2.6rem, 5vw, 4rem)",
+          lineHeight: 1.02,
+          letterSpacing: "-0.015em",
+          fontWeight: 400,
+          margin: "0 0 20px",
+          color: "var(--color-text-primary)",
         }}
       >
         {walkthrough.title}
       </h1>
       <p
         style={{
+          fontFamily: "var(--font-sans)",
+          fontSize: "1.15rem",
+          lineHeight: 1.5,
           fontStyle: "italic",
-          fontSize: "1.2rem",
-          lineHeight: 1.45,
-          color: "var(--ink-soft, #3a2e23)",
+          color: "var(--color-text-secondary)",
           maxWidth: "44rem",
           margin: 0,
+          fontWeight: 300,
         }}
       >
         {walkthrough.subtitle}
@@ -191,10 +213,11 @@ function Opening({ walkthrough }: { walkthrough: Walkthrough }) {
   return (
     <section
       style={{
-        padding: "40px 64px 8px",
+        padding: "44px 56px 12px",
         maxWidth: "720px",
-        fontSize: "1.1rem",
-        lineHeight: 1.7,
+        fontSize: "1.05rem",
+        lineHeight: 1.72,
+        color: "var(--color-text-primary)",
       }}
     >
       <p
@@ -204,36 +227,32 @@ function Opening({ walkthrough }: { walkthrough: Walkthrough }) {
         }}
       >
         <span
+          aria-hidden="true"
           style={{
             float: "left",
-            fontFamily: "inherit",
-            fontWeight: 600,
-            fontSize: "3.4em",
-            lineHeight: 0.92,
-            padding: "0.05em 0.12em 0 0",
-            color: "var(--accent, #7a2519)",
+            fontFamily: "var(--font-heading)",
+            fontWeight: 400,
+            fontSize: "4.6em",
+            lineHeight: 0.88,
+            padding: "0.06em 0.16em 0 0",
+            color: "var(--color-accent)",
+            letterSpacing: "-0.02em",
           }}
         >
           {walkthrough.opening.problem.charAt(0)}
         </span>
         {walkthrough.opening.problem.slice(1)}
       </p>
-      <p style={{ margin: "0 0 1.2em" }}>{walkthrough.opening.tease}</p>
-      <p style={{ margin: 0 }}>{walkthrough.opening.concreteInstance}</p>
+      <p style={{ margin: "0 0 1.2em", color: "var(--color-text-primary)" }}>
+        {walkthrough.opening.tease}
+      </p>
+      <p style={{ margin: 0, color: "var(--color-text-secondary)" }}>
+        {walkthrough.opening.concreteInstance}
+      </p>
     </section>
   );
 }
 
-/**
- * Heart of the reader. Two columns:
- *   - left: scrolling prose for each scene
- *   - right: sticky pane with all unique code excerpts stacked
- *     absolutely. The one whose scene is currently in view fades in;
- *     others fade out.
- *
- * The fade is driven by an IntersectionObserver against the modal's
- * own scroll container.
- */
 function ScenesWithStickyCode({
   walkthrough,
   scrollContainer,
@@ -241,8 +260,6 @@ function ScenesWithStickyCode({
   walkthrough: Walkthrough;
   scrollContainer: React.MutableRefObject<HTMLDivElement | null>;
 }) {
-  // Build the list of unique excerpts (so identical path+lineRange
-  // sharing across scenes only appears once in the stack).
   const excerptKey = (e: NonNullable<WalkthroughScene["codeExcerpt"]>) =>
     `${e.path}::${e.lineRange[0]}-${e.lineRange[1]}`;
 
@@ -256,24 +273,14 @@ function ScenesWithStickyCode({
     return Array.from(seen.entries()).map(([k, excerpt]) => ({ key: k, excerpt }));
   }, [walkthrough]);
 
-  // For each scene that has a code excerpt, which excerpt key does it
-  // map to? Scenes without a codeExcerpt fall back to whatever the
-  // scroll-active scene already showed (we don't track them here, the
-  // resolver does — see resolveActiveExcerptKey below).
   const sceneToExcerptKey = useMemo(() => {
     const m = new Map<string, string>();
     for (const scene of walkthrough.scenes) {
-      if (scene.codeExcerpt) {
-        m.set(scene.id, excerptKey(scene.codeExcerpt));
-      }
+      if (scene.codeExcerpt) m.set(scene.id, excerptKey(scene.codeExcerpt));
     }
     return m;
   }, [walkthrough]);
 
-  // Resolve a scene id to the excerpt key that should be visible. If
-  // the scene has its own excerpt, use that. Otherwise fall back to
-  // the nearest *preceding* scene with one — so reading prose-only
-  // scenes still leaves the prior section's code visible.
   const resolveExcerptForScene = useCallback(
     (sceneId: string | null): string | null => {
       if (!sceneId) return null;
@@ -290,16 +297,13 @@ function ScenesWithStickyCode({
     [sceneToExcerptKey, walkthrough.scenes, uniqueExcerpts]
   );
 
-  // Fetch each unique source file once. Cache by path.
   const [files, setFiles] = useState<Record<string, FetchState>>({});
   useEffect(() => {
     const paths = Array.from(new Set(uniqueExcerpts.map((e) => e.excerpt.path)));
     let cancelled = false;
     for (const p of paths) {
-      if (files[p]) continue; // already loading or loaded
-      setFiles((prev) =>
-        prev[p] ? prev : { ...prev, [p]: { status: "loading" } }
-      );
+      if (files[p]) continue;
+      setFiles((prev) => (prev[p] ? prev : { ...prev, [p]: { status: "loading" } }));
       fetch(tokenizedUrl("file-content.json", { path: p }))
         .then(async (res) => {
           if (cancelled) return;
@@ -307,10 +311,7 @@ function ScenesWithStickyCode({
             const errBody = await res.json().catch(() => ({}));
             setFiles((prev) => ({
               ...prev,
-              [p]: {
-                status: "error",
-                error: errBody.error || `HTTP ${res.status}`,
-              },
+              [p]: { status: "error", error: errBody.error || `HTTP ${res.status}` },
             }));
             return;
           }
@@ -333,10 +334,7 @@ function ScenesWithStickyCode({
         })
         .catch((err) => {
           if (cancelled) return;
-          setFiles((prev) => ({
-            ...prev,
-            [p]: { status: "error", error: String(err) },
-          }));
+          setFiles((prev) => ({ ...prev, [p]: { status: "error", error: String(err) } }));
         });
     }
     return () => {
@@ -345,13 +343,6 @@ function ScenesWithStickyCode({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uniqueExcerpts]);
 
-  // Two parallel tracks for "which scene is the user reading":
-  //   scrollSceneId — derived from IntersectionObserver, the topmost
-  //     scene crossing the trigger band.
-  //   hoverSceneId — the scene the user is currently pointing at.
-  // Hover wins. Move the cursor away (or out of any scene), scroll
-  // wins again. This matches the affordance most text+figure essays
-  // use: scroll is the default, hover is the override.
   const sceneRefs = useRef<Map<string, HTMLElement | null>>(new Map());
   const [scrollSceneId, setScrollSceneId] = useState<string | null>(
     () => walkthrough.scenes[0]?.id ?? null
@@ -365,41 +356,27 @@ function ScenesWithStickyCode({
     if (el) sceneRefs.current.set(id, el);
     else sceneRefs.current.delete(id);
   }, []);
-
-  const handleSceneHover = useCallback((id: string) => {
-    setHoverSceneId(id);
-  }, []);
-  const handleSceneUnhover = useCallback((id: string) => {
-    setHoverSceneId((current) => (current === id ? null : current));
-  }, []);
+  const handleSceneHover = useCallback((id: string) => setHoverSceneId(id), []);
+  const handleSceneUnhover = useCallback(
+    (id: string) => setHoverSceneId((c) => (c === id ? null : c)),
+    []
+  );
 
   useEffect(() => {
     const root = scrollContainer.current;
     if (!root) return;
     if (walkthrough.scenes.length === 0) return;
 
-    // We observe *every* scene now, not just ones with code, because
-    // the active state also drives the visible highlight on the prose
-    // side. resolveExcerptForScene handles fallback for prose-only
-    // scenes.
     const observer = new IntersectionObserver(
       (entries) => {
         const visible = entries
           .filter((e) => e.isIntersecting)
-          .sort(
-            (a, b) =>
-              a.boundingClientRect.top - b.boundingClientRect.top
-          );
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
         if (visible.length === 0) return;
-        const top = visible[0];
-        const sceneId = (top.target as HTMLElement).dataset.sceneId;
+        const sceneId = (visible[0].target as HTMLElement).dataset.sceneId;
         if (sceneId) setScrollSceneId(sceneId);
       },
-      {
-        root,
-        rootMargin: "-30% 0px -55% 0px",
-        threshold: 0,
-      }
+      { root, rootMargin: "-30% 0px -55% 0px", threshold: 0 }
     );
 
     for (const scene of walkthrough.scenes) {
@@ -415,29 +392,13 @@ function ScenesWithStickyCode({
       style={{
         display: "grid",
         gridTemplateColumns:
-          uniqueExcerpts.length > 0
-            ? "minmax(0, 1fr) minmax(0, 1.3fr)"
-            : "1fr",
-        columnGap: "40px",
-        padding: "16px 40px 16px",
-        // No alignItems — let the aside stretch to the grid row height,
-        // so the sticky element inside has somewhere to scroll within.
+          uniqueExcerpts.length > 0 ? "minmax(0, 1fr) minmax(0, 1.3fr)" : "1fr",
+        columnGap: "44px",
+        padding: "20px 56px 20px",
       }}
       onMouseLeave={() => setHoverSceneId(null)}
     >
-      <div
-        style={{
-          // Overscroll. The sticky code pane is ~calc(100vh - 96px) tall;
-          // when the prose column ends, the grid row ends, the aside
-          // ends, and the sticky element detaches and rides the
-          // containing block's bottom upward — pushing the code excerpt
-          // above the modal's top while the reader is still on the last
-          // scene. Extending the prose column by a viewport-and-change
-          // gives the sticky enough runway to remain pinned at top:12px
-          // through every scene, including the last.
-          paddingBottom: "80vh",
-        }}
-      >
+      <div style={{ paddingBottom: "80vh" }}>
         {walkthrough.scenes.map((scene, i) => (
           <SceneProse
             key={scene.id}
@@ -495,21 +456,21 @@ function SceneProse({
       style={{
         position: "relative",
         maxWidth: "44rem",
-        marginBottom: "16px",
-        padding: scene.isClimax ? "28px 16px" : "20px 16px",
-        marginLeft: "-16px",
-        marginRight: "-16px",
+        marginBottom: "20px",
+        padding: scene.isClimax ? "32px 18px" : "20px 18px",
+        marginLeft: "-18px",
+        marginRight: "-18px",
         borderTop: scene.isClimax
-          ? "1px solid var(--accent, #7a2519)"
+          ? "1px solid var(--color-accent-overlay-border)"
           : "none",
         borderBottom: scene.isClimax
-          ? "1px solid var(--accent, #7a2519)"
+          ? "1px solid var(--color-accent-overlay-border)"
           : "none",
         borderLeft: isActive
-          ? "2px solid var(--accent, #7a2519)"
+          ? "2px solid var(--color-accent)"
           : "2px solid transparent",
-        background: isActive ? "rgba(122, 37, 25, 0.04)" : "transparent",
-        borderRadius: "2px",
+        background: isActive ? "var(--color-accent-overlay-bg)" : "transparent",
+        borderRadius: "3px",
         transition:
           "background-color 220ms ease, border-color 220ms ease",
         scrollMarginTop: "30vh",
@@ -517,18 +478,24 @@ function SceneProse({
     >
       <div
         style={{
-          fontFamily:
-            '"IBM Plex Mono", ui-monospace, Menlo, monospace',
-          fontSize: "0.78rem",
-          color: "var(--ink-faint, #978670)",
-          marginBottom: "10px",
+          fontFamily: "var(--font-mono)",
+          fontSize: "0.72rem",
+          letterSpacing: "0.08em",
+          color: isActive ? "var(--color-accent)" : "var(--color-text-muted)",
+          marginBottom: "12px",
+          transition: "color 220ms ease",
         }}
       >
-        § {index}
+        § {String(index).padStart(2, "0")}
       </div>
       <div
         className="walkthrough-prose"
-        style={{ lineHeight: 1.65, fontSize: "1.05rem" }}
+        style={{
+          fontFamily: "var(--font-sans)",
+          fontSize: "1.0rem",
+          lineHeight: 1.7,
+          color: "var(--color-text-primary)",
+        }}
       >
         <ReactMarkdown
           components={{
@@ -541,6 +508,26 @@ function SceneProse({
                 {children}
               </SymbolMark>
             ),
+            p: ({ children }) => (
+              <p style={{ margin: "0 0 1.05em" }}>{children}</p>
+            ),
+            strong: ({ children }) => (
+              <strong
+                style={{ fontWeight: 600, color: "var(--color-text-primary)" }}
+              >
+                {children}
+              </strong>
+            ),
+            em: ({ children }) => (
+              <em
+                style={{
+                  fontStyle: "italic",
+                  color: "var(--color-text-primary)",
+                }}
+              >
+                {children}
+              </em>
+            ),
           }}
         >
           {scene.prose}
@@ -549,15 +536,15 @@ function SceneProse({
       {scene.isClimax && pullQuote && (
         <blockquote
           style={{
-            fontSize: "1.4rem",
-            lineHeight: 1.4,
-            fontWeight: 500,
-            color: "var(--ink, #1c1611)",
+            fontFamily: "var(--font-heading)",
+            fontSize: "1.55rem",
+            lineHeight: 1.32,
+            fontWeight: 400,
+            color: "var(--color-accent)",
             margin: "28px 0 8px",
-            padding: "24px 0",
-            borderTop: "1px solid var(--rule, #d5c7a4)",
-            borderBottom: "1px solid var(--rule, #d5c7a4)",
+            padding: "0",
             textWrap: "balance" as React.CSSProperties["textWrap"],
+            letterSpacing: "-0.005em",
           }}
         >
           {pullQuote}
@@ -579,27 +566,19 @@ function StickyCodePane({
   files: Record<string, FetchState>;
   hoveredSymbol: string | null;
 }) {
-  // Two-layer structure so position:sticky works inside a CSS grid:
-  // the <aside> is the grid item with NO height of its own — the
-  // grid's default align-items:stretch lets it fill the row height,
-  // which is dictated by the (tall) prose column. The inner div is
-  // what actually sticks, positioned top:12px within that tall
-  // aside. Setting height:100% on the aside was previously
-  // collapsing it to the inner div's height (because percentages
-  // resolve to auto when the parent's height is auto), which left
-  // sticky with zero room to scroll within.
   return (
     <aside>
       <div
         style={{
           position: "sticky",
-          top: "12px",
+          top: "16px",
           height: "calc(100vh - 96px)",
           minHeight: "32rem",
-          background: "var(--paper-recess, #ebe2cb)",
-          border: "1px solid var(--rule, #d5c7a4)",
-          borderRadius: "2px",
+          background: "var(--color-panel)",
+          border: "1px solid var(--color-border-subtle)",
+          borderRadius: "6px",
           overflow: "hidden",
+          boxShadow: "inset 0 0 0 1px rgba(212, 165, 116, 0.02)",
         }}
       >
         {excerpts.map(({ key, excerpt }) => {
@@ -637,9 +616,9 @@ function ExcerptStack({
         position: "absolute",
         inset: 0,
         opacity: isActive ? 1 : 0,
-        transform: isActive ? "translateY(0)" : "translateY(14px)",
+        transform: isActive ? "translateY(0)" : "translateY(10px)",
         transition:
-          "opacity 720ms cubic-bezier(0.16, 1, 0.3, 1), transform 720ms cubic-bezier(0.16, 1, 0.3, 1)",
+          "opacity 600ms cubic-bezier(0.16, 1, 0.3, 1), transform 600ms cubic-bezier(0.16, 1, 0.3, 1)",
         pointerEvents: isActive ? "auto" : "none",
         display: "flex",
         flexDirection: "column",
@@ -650,37 +629,23 @@ function ExcerptStack({
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          padding: "10px 16px",
-          borderBottom: "1px solid var(--rule, #d5c7a4)",
-          background: "var(--bg-deep, #ecdfca)",
-          fontFamily:
-            '"IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif',
+          padding: "12px 18px",
+          borderBottom: "1px solid var(--color-border-subtle)",
+          background: "var(--color-elevated)",
+          fontFamily: "var(--font-mono)",
           fontSize: "0.7rem",
-          fontWeight: 500,
-          letterSpacing: "0.14em",
-          textTransform: "uppercase",
-          color: "var(--ink-mute, #6a5a48)",
+          letterSpacing: "0.04em",
+          color: "var(--color-text-muted)",
           flexShrink: 0,
         }}
       >
-        <span>{excerpt.path}</span>
-        <span
-          style={{
-            fontFamily: '"IBM Plex Mono", ui-monospace, Menlo, monospace',
-            letterSpacing: 0,
-            textTransform: "none",
-            color: "var(--ink-faint, #978670)",
-          }}
-        >
+        <span style={{ color: "var(--color-text-secondary)" }}>{excerpt.path}</span>
+        <span style={{ color: "var(--color-text-muted)" }}>
           {excerpt.lineRange[0]}–{excerpt.lineRange[1]}
         </span>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        <CodeContent
-          excerpt={excerpt}
-          fileState={fileState}
-          hoveredSymbol={hoveredSymbol}
-        />
+        <CodeContent excerpt={excerpt} fileState={fileState} hoveredSymbol={hoveredSymbol} />
       </div>
     </div>
   );
@@ -697,14 +662,28 @@ function CodeContent({
 }) {
   if (!fileState || fileState.status === "loading") {
     return (
-      <div style={{ padding: "16px", color: "var(--ink-faint, #978670)", fontFamily: '"IBM Plex Mono", ui-monospace, Menlo, monospace', fontSize: "0.82rem" }}>
+      <div
+        style={{
+          padding: "20px",
+          color: "var(--color-text-muted)",
+          fontFamily: "var(--font-mono)",
+          fontSize: "0.78rem",
+        }}
+      >
         Loading {excerpt.path}…
       </div>
     );
   }
   if (fileState.status === "error" || !fileState.file) {
     return (
-      <div style={{ padding: "16px", color: "var(--accent, #7a2519)", fontFamily: '"IBM Plex Mono", ui-monospace, Menlo, monospace', fontSize: "0.82rem" }}>
+      <div
+        style={{
+          padding: "20px",
+          color: "var(--color-accent)",
+          fontFamily: "var(--font-mono)",
+          fontSize: "0.78rem",
+        }}
+      >
         Could not load {excerpt.path}
         {fileState?.error ? ` — ${fileState.error}` : ""}
       </div>
@@ -712,7 +691,6 @@ function CodeContent({
   }
   const { lines, language } = fileState.file;
   const [start, end] = excerpt.lineRange;
-  // Clamp to file bounds (1-indexed line range from the schema)
   const clampStart = Math.max(1, Math.min(start, lines.length));
   const clampEnd = Math.max(clampStart, Math.min(end, lines.length));
   const slice = lines.slice(clampStart - 1, clampEnd);
@@ -722,7 +700,7 @@ function CodeContent({
 
   return (
     <Highlight
-      theme={themes.vsLight}
+      theme={themes.vsDark}
       code={code}
       language={(excerpt.language || language || "javascript") as never}
     >
@@ -733,20 +711,17 @@ function CodeContent({
             ...style,
             background: "transparent",
             margin: 0,
-            padding: "12px 16px",
-            fontFamily: '"IBM Plex Mono", ui-monospace, Menlo, monospace',
-            fontSize: "0.82rem",
-            lineHeight: 1.55,
+            padding: "16px 18px",
+            fontFamily: "var(--font-mono)",
+            fontSize: "0.8rem",
+            lineHeight: 1.6,
+            color: "var(--color-text-primary)",
           }}
         >
           {tokens.map((line, i) => {
             const absLine = startLineForDisplay + i;
             const isAuthoredHighlight =
               highlightLine !== undefined && absLine === highlightLine;
-            // Cross-highlight: if the user is hovering an inline-code
-            // symbol in the prose, and this line of source contains
-            // that token (whole-word match, case-sensitive), the line
-            // gets a subtle highlight band.
             const rawLineText = slice[i] ?? "";
             const isSymbolHighlight =
               hoveredSymbol !== null &&
@@ -764,15 +739,15 @@ function CodeContent({
                   ...(lineProps.style as React.CSSProperties),
                   display: "flex",
                   background: isAuthoredHighlight
-                    ? "rgba(122, 37, 25, 0.10)"
+                    ? "rgba(212, 165, 116, 0.10)"
                     : isSymbolHighlight
-                      ? "rgba(122, 37, 25, 0.07)"
+                      ? "rgba(212, 165, 116, 0.06)"
                       : "transparent",
                   borderLeft: isHighlight
-                    ? "2px solid var(--accent, #7a2519)"
+                    ? "2px solid var(--color-accent)"
                     : "2px solid transparent",
-                  paddingLeft: "8px",
-                  marginLeft: "-8px",
+                  paddingLeft: "10px",
+                  marginLeft: "-10px",
                   transition: "background-color 180ms ease",
                 }}
               >
@@ -781,10 +756,10 @@ function CodeContent({
                     width: "3em",
                     flexShrink: 0,
                     textAlign: "right",
-                    paddingRight: "12px",
-                    color: "var(--ink-faint, #978670)",
+                    paddingRight: "14px",
+                    color: "var(--color-text-muted)",
                     userSelect: "none",
-                    opacity: 0.7,
+                    opacity: 0.5,
                   }}
                 >
                   {absLine}
@@ -807,13 +782,6 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/**
- * Inline `code` in walkthrough prose. On hover, the symbol is published
- * upward via setHoveredSymbol, which the StickyCodePane reads to
- * highlight matching lines in the current code excerpt. Visually, the
- * mark gets a subtle accent treatment whenever the symbol matches the
- * currently-hovered one (anywhere — including the same span you're on).
- */
 function SymbolMark({
   children,
   hoveredSymbol,
@@ -837,19 +805,21 @@ function SymbolMark({
       onMouseEnter={() => symbol && setHoveredSymbol(symbol)}
       onMouseLeave={() => setHoveredSymbol(null)}
       style={{
-        fontFamily:
-          '"IBM Plex Mono", ui-monospace, Menlo, monospace',
-        fontSize: "0.92em",
+        fontFamily: "var(--font-mono)",
+        fontSize: "0.9em",
         background: isHovered
-          ? "rgba(122, 37, 25, 0.16)"
-          : "rgba(122, 37, 25, 0.06)",
+          ? "rgba(212, 165, 116, 0.18)"
+          : "rgba(212, 165, 116, 0.07)",
         color: isHovered
-          ? "var(--accent, #7a2519)"
-          : "var(--ink-soft, #3a2e23)",
-        padding: "1px 5px",
-        borderRadius: "2px",
+          ? "var(--color-accent-bright)"
+          : "var(--color-accent-dim)",
+        padding: "1px 6px",
+        borderRadius: "3px",
         cursor: "default",
-        transition: "background-color 160ms ease, color 160ms ease",
+        border: isHovered
+          ? "1px solid var(--color-accent)"
+          : "1px solid transparent",
+        transition: "background-color 160ms ease, color 160ms ease, border-color 160ms ease",
       }}
     >
       {children}
@@ -876,44 +846,53 @@ function CardShell({
   return (
     <aside
       style={{
-        margin: "20px 0",
-        background: "var(--paper, #f9f4e7)",
-        border: "1px dashed var(--rule, #d5c7a4)",
-        borderRadius: "2px",
+        margin: "22px 0",
+        background: "var(--color-elevated)",
+        border: "1px solid var(--color-border-subtle)",
+        borderRadius: "4px",
       }}
     >
       <div
         style={{
           display: "flex",
           justifyContent: "space-between",
-          padding: "8px 16px",
-          borderBottom: "1px dashed var(--rule, #d5c7a4)",
-          fontFamily:
-            '"IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif',
-          fontSize: "0.7rem",
-          letterSpacing: "0.16em",
+          padding: "10px 16px",
+          borderBottom: "1px solid var(--color-border-subtle)",
+          fontFamily: "var(--font-mono)",
+          fontSize: "0.68rem",
+          letterSpacing: "0.10em",
           textTransform: "uppercase",
         }}
       >
-        <span style={{ fontWeight: 600, color: "var(--accent, #7a2519)" }}>
+        <span
+          style={{ fontWeight: 500, color: "var(--color-accent)" }}
+        >
           {label}
         </span>
-        {detail && <span style={{ color: "var(--ink-faint, #978670)" }}>{detail}</span>}
+        {detail && (
+          <span style={{ color: "var(--color-text-muted)" }}>{detail}</span>
+        )}
       </div>
-      <div style={{ padding: "12px 16px" }}>{children}</div>
+      <div style={{ padding: "14px 16px" }}>{children}</div>
     </aside>
   );
 }
 
 function BeatCard({ beat }: { beat: BeatPlaceholder }) {
-  const accent = "var(--accent, #7a2519)";
-  const accentSoft = "var(--accent-soft, #a04738)";
   return (
     <CardShell
       label={`Beat · ${beat.beatType}`}
-      detail={beat.windowSeconds ? `${beat.windowSeconds}s window` : undefined}
+      detail={beat.windowSeconds ? `${beat.windowSeconds}s` : undefined}
     >
-      <p style={{ fontStyle: "italic", margin: "0 0 12px" }}>{beat.question}</p>
+      <p
+        style={{
+          fontStyle: "italic",
+          margin: "0 0 14px",
+          color: "var(--color-text-primary)",
+        }}
+      >
+        {beat.question}
+      </p>
       <div
         style={{
           display: "grid",
@@ -921,44 +900,55 @@ function BeatCard({ beat }: { beat: BeatPlaceholder }) {
           gap: "8px",
         }}
       >
-        {beat.candidates.map((c, i) => (
-          <div
-            key={i}
-            style={{
-              background:
-                i === beat.answerIndex ? "rgba(122, 37, 25, 0.08)" : "white",
-              border:
-                i === beat.answerIndex
-                  ? `1px solid ${accent}`
-                  : "1px solid var(--rule, #d5c7a4)",
-              borderRadius: "2px",
-              padding: "8px 12px",
-              fontFamily:
-                '"IBM Plex Mono", ui-monospace, Menlo, monospace',
-              fontSize: "0.82rem",
-              color: i === beat.answerIndex ? accent : "var(--ink-soft, #3a2e23)",
-              textAlign: "center",
-            }}
-          >
-            {c}
-          </div>
-        ))}
+        {beat.candidates.map((c, i) => {
+          const correct = i === beat.answerIndex;
+          return (
+            <div
+              key={i}
+              style={{
+                background: correct
+                  ? "var(--color-accent-overlay-bg)"
+                  : "var(--color-surface)",
+                border: correct
+                  ? "1px solid var(--color-accent-overlay-border)"
+                  : "1px solid var(--color-border-subtle)",
+                borderRadius: "3px",
+                padding: "8px 12px",
+                fontFamily: "var(--font-mono)",
+                fontSize: "0.78rem",
+                color: correct
+                  ? "var(--color-accent-bright)"
+                  : "var(--color-text-secondary)",
+                textAlign: "center",
+              }}
+            >
+              {c}
+            </div>
+          );
+        })}
       </div>
       <p
         style={{
-          marginTop: "12px",
-          fontFamily:
-            '"IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif',
+          marginTop: "14px",
           fontSize: "0.85rem",
           fontStyle: "italic",
-          color: "var(--ink-mute, #6a5a48)",
+          color: "var(--color-text-secondary)",
         }}
       >
         <strong
-          style={{ color: accentSoft, fontStyle: "normal", fontWeight: 600 }}
+          style={{
+            color: "var(--color-accent)",
+            fontStyle: "normal",
+            fontWeight: 600,
+            fontFamily: "var(--font-mono)",
+            fontSize: "0.72rem",
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            marginRight: "8px",
+          }}
         >
-          Reveal:
-        </strong>{" "}
+          Reveal
+        </strong>
         {beat.reveal}
       </p>
     </CardShell>
@@ -972,7 +962,7 @@ function FocalCard({ focal }: { focal: FocalPlaceholder }) {
         style={{
           margin: 0,
           fontStyle: "italic",
-          color: "var(--ink-soft, #3a2e23)",
+          color: "var(--color-text-secondary)",
         }}
       >
         {focal.description}
@@ -989,7 +979,7 @@ function SimCard({ sim }: { sim: SimPlaceholder }) {
         style={{
           margin: 0,
           fontStyle: "italic",
-          color: "var(--ink-soft, #3a2e23)",
+          color: "var(--color-text-secondary)",
         }}
       >
         {sim.description}
@@ -1006,11 +996,10 @@ function ParamsList({ params }: { params: Record<string, string> }) {
         display: "grid",
         gridTemplateColumns: "max-content 1fr",
         gap: "4px 16px",
-        marginTop: "8px",
+        marginTop: "10px",
         fontSize: "0.78rem",
-        fontFamily:
-          '"IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif',
-        color: "var(--ink-soft, #3a2e23)",
+        fontFamily: "var(--font-mono)",
+        color: "var(--color-text-secondary)",
       }}
     >
       {Object.entries(params).map(([k, v]) => (
@@ -1019,22 +1008,14 @@ function ParamsList({ params }: { params: Record<string, string> }) {
             style={{
               textTransform: "uppercase",
               letterSpacing: "0.08em",
-              fontSize: "0.7rem",
-              color: "var(--ink-faint, #978670)",
+              fontSize: "0.68rem",
+              color: "var(--color-text-muted)",
               fontWeight: 500,
             }}
           >
             {k}
           </dt>
-          <dd
-            style={{
-              margin: 0,
-              fontFamily:
-                '"IBM Plex Mono", ui-monospace, Menlo, monospace',
-            }}
-          >
-            {v}
-          </dd>
+          <dd style={{ margin: 0 }}>{v}</dd>
         </div>
       ))}
     </dl>
@@ -1045,16 +1026,17 @@ function Coda({ walkthrough }: { walkthrough: Walkthrough }) {
   return (
     <footer
       style={{
-        padding: "8px 64px 64px",
-        maxWidth: "880px",
+        padding: "8px 56px 80px",
+        maxWidth: "1020px",
       }}
     >
       <div
         style={{
-          fontSize: "1.1rem",
-          lineHeight: 1.65,
-          margin: "32px 0 48px",
+          fontSize: "1.05rem",
+          lineHeight: 1.7,
+          margin: "32px 0 56px",
           maxWidth: "44rem",
+          color: "var(--color-text-primary)",
           textWrap: "pretty" as React.CSSProperties["textWrap"],
         }}
       >
@@ -1064,40 +1046,53 @@ function Coda({ walkthrough }: { walkthrough: Walkthrough }) {
         <>
           <div
             style={{
-              fontFamily:
-                '"IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif',
-              fontSize: "0.7rem",
-              letterSpacing: "0.18em",
+              fontFamily: "var(--font-mono)",
+              fontSize: "0.72rem",
+              letterSpacing: "0.14em",
               textTransform: "uppercase",
-              color: "var(--ink-mute, #6a5a48)",
-              fontWeight: 600,
-              borderTop: "1px solid var(--rule, #d5c7a4)",
-              paddingTop: "20px",
-              marginBottom: "16px",
+              color: "var(--color-text-muted)",
+              borderTop: "1px solid var(--color-border-subtle)",
+              paddingTop: "24px",
+              marginBottom: "20px",
+              display: "flex",
+              gap: "10px",
+              alignItems: "center",
             }}
           >
-            Review · {walkthrough.coda.prompts.length} prompt
-            {walkthrough.coda.prompts.length === 1 ? "" : "s"}
+            <span style={{ color: "var(--color-accent)" }}>Review</span>
+            <span style={{ opacity: 0.5 }}>
+              {walkthrough.coda.prompts.length} prompt
+              {walkthrough.coda.prompts.length === 1 ? "" : "s"}
+            </span>
           </div>
           <div
             style={{
               display: "grid",
               gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
               gap: "16px",
-              marginTop: "8px",
             }}
           >
             {walkthrough.coda.prompts.map((p, i) => (
               <article
                 key={i}
                 style={{
-                  background: "var(--paper, #f9f4e7)",
-                  border: "1px solid var(--rule, #d5c7a4)",
-                  borderRadius: "2px",
-                  padding: "12px 16px",
+                  background: "var(--color-elevated)",
+                  border: "1px solid var(--color-border-subtle)",
+                  borderRadius: "4px",
+                  padding: "14px 18px",
+                  transition: "border-color 200ms ease",
                 }}
               >
-                <p style={{ margin: 0, lineHeight: 1.5 }}>{p.question}</p>
+                <p
+                  style={{
+                    margin: 0,
+                    lineHeight: 1.55,
+                    color: "var(--color-text-primary)",
+                    fontSize: "0.94rem",
+                  }}
+                >
+                  {p.question}
+                </p>
               </article>
             ))}
           </div>
