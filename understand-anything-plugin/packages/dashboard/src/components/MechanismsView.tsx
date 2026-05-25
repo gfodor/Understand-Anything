@@ -35,25 +35,18 @@ const KIND_ORDER: MechanismKind[] = [
   "architectural-elision",
 ];
 
-const KIND_LABEL: Record<MechanismKind, string> = {
-  algorithmic: "Algorithmic spines",
-  "data-structure": "Data-structure cleverness",
-  protocol: "Cross-process protocols",
-  architectural: "Architectural mechanisms",
-  "architectural-elision": "Architectural elisions",
-};
-
-// Grid layout: each kind is a row, mechanisms in that kind sit side by side.
+// Grid layout: kinds are spatial rows but unlabeled (each card carries
+// its own kind tag in the corner; section headings were redundant
+// scaffolding).
 const NODE_WIDTH = 320;
 const NODE_HEIGHT = 160;
 const COL_GAP = 32;
-const ROW_GAP = 80;
-const HEADER_OFFSET = 60;
+const ROW_GAP = 56;
+const TOP_OFFSET = 40;
 
 function buildLayout(mechanisms: Mechanism[]): {
   nodes: MechanismFlowNode[];
   edges: Edge[];
-  headers: { kind: MechanismKind; y: number }[];
 } {
   const byKind = new Map<MechanismKind, Mechanism[]>();
   for (const m of mechanisms) {
@@ -62,31 +55,29 @@ function buildLayout(mechanisms: Mechanism[]): {
   }
 
   const nodes: MechanismFlowNode[] = [];
-  const headers: { kind: MechanismKind; y: number }[] = [];
-  let y = HEADER_OFFSET;
+  let y = TOP_OFFSET;
   for (const kind of KIND_ORDER) {
     const items = byKind.get(kind);
     if (!items || items.length === 0) continue;
-    headers.push({ kind, y });
     let x = 40;
     for (const m of items) {
       nodes.push({
         id: m.id,
         type: "mechanism-node",
-        position: { x, y: y + 28 },
+        position: { x, y },
         data: { mechanism: m },
       });
       x += NODE_WIDTH + COL_GAP;
     }
     y += NODE_HEIGHT + ROW_GAP;
   }
-  return { nodes, edges: [], headers };
+  return { nodes, edges: [] };
 }
 
 export function MechanismsView() {
   const mechanismGraph = useDashboardStore((s) => s.mechanismGraph);
 
-  const { nodes, edges, headers } = useMemo(
+  const { nodes, edges } = useMemo(
     () => buildLayout(mechanismGraph?.mechanisms ?? []),
     [mechanismGraph],
   );
@@ -124,27 +115,6 @@ export function MechanismsView() {
 
   return (
     <div className="h-full w-full relative">
-      {/* Section headers floating over the ReactFlow canvas */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{ zIndex: 5 }}
-      >
-        {headers.map((h) => (
-          <div
-            key={h.kind}
-            className="absolute font-mono uppercase tracking-wider text-[10px] font-semibold"
-            style={{
-              left: 40,
-              top: h.y,
-              color: "var(--color-text-muted)",
-              opacity: 0.85,
-            }}
-          >
-            {KIND_LABEL[h.kind]}
-          </div>
-        ))}
-      </div>
-
       <ReactFlow
         nodes={nodes}
         edges={edges}
