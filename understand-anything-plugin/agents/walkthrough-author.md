@@ -78,21 +78,72 @@ Write the full `Walkthrough` JSON document to the path given by the orchestrator
 }
 ```
 
-### Embeds (optional)
+### Embeds
 
-Scenes can carry one typed embed placeholder. These render as labeled cards in the v1 dashboard; future renderers may make them interactive. Pick at most:
+Scenes can carry one typed embed. The v1 renderer supports two kinds:
 
-- **One focal diagram per walkthrough**, ideally for the most visually-tractable moment (a sequence diagram for cross-process protocols, a data-structure diagram for packed-integer mechanisms, a state diagram for state machines).
-- **One simulation embed near the climax** (mechanism walkthroughs only), if the climactic recognition would benefit from the reader playing with a parameter (e.g., a slider for color-jitter that shows how the equality-merge result fragments).
-- **2–4 beat embeds spread through the walkthrough** — these are prediction prompts the reader commits to before the reveal. Use `predict-outcome`, `spot-beacon`, `trace-execution`, or `chunk-it`.
+- **Beats** — interactive prediction prompts. Render as a clickable multi-choice card; the reader picks a candidate, the renderer reveals correctness + the explanation. 2–4 beats spread through a walkthrough is the typical density. Use beatType `predict-outcome`, `spot-beacon`, `trace-execution`, or `chunk-it`.
+- **Focal diagrams** — rendered by Mermaid. ONLY three template values are supported by the v1 renderer: `sequence-diagram`, `state-diagram`, `system-diagram`. Each carries Mermaid source under `parameters.source`. **Do not emit focal embeds with any other template value** — the renderer skips them silently, and the walkthrough is worse for the dead embed.
+
+**Simulations are out of scope in v1.** Do not emit `kind: "simulation"` embeds at all, regardless of `template`. They are still in the schema but the renderer ignores them.
 
 Embed shapes:
 
 ```json
 { "kind": "beat", "beatType": "predict-outcome", "question": "<...>", "candidates": ["<...>", "<...>", "<...>", "<...>"], "answerIndex": <0-3>, "reveal": "<one paragraph explaining the answer>" }
-{ "kind": "focal", "template": "sequence-diagram", "description": "<what would be drawn>", "parameters": { "<param>": "<value>" } }
-{ "kind": "simulation", "template": "parameter-scrubber", "description": "<what the reader would manipulate>", "parameters": { "<param>": "<value>" } }
+
+{ "kind": "focal", "template": "sequence-diagram", "description": "<optional one-line caption>", "parameters": { "source": "<Mermaid source>" } }
 ```
+
+### Mermaid source for focal embeds
+
+The renderer dark-themes Mermaid automatically (tan accent, matte ink). You only supply the **Mermaid source string** as `parameters.source`. Keep diagrams small (3–6 participants for sequence, 3–8 states for state diagrams, 4–10 nodes for system). Examples:
+
+**Sequence diagram** — for cross-process or call-order moments:
+
+```
+sequenceDiagram
+    participant Producer
+    participant SharedMemory
+    participant Consumer
+    Producer->>SharedMemory: write_sequence++ (odd)
+    Producer->>SharedMemory: write records
+    Producer->>SharedMemory: write_sequence++ (even)
+    Consumer->>SharedMemory: read seq0
+    Consumer->>SharedMemory: copy records
+    Consumer->>SharedMemory: read seq1
+    Note over Consumer: seq0 == seq1 ? snapshot is consistent
+```
+
+**State diagram** — for mode transitions, state-machine mechanisms:
+
+```
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Rehashing: load_factor > 1
+    Rehashing --> Rehashing: each user op moves 1 bucket
+    Rehashing --> Idle: rehashidx >= old_size
+    Idle --> [*]
+```
+
+**System diagram** — flowchart for component/process topologies:
+
+```
+flowchart LR
+    Mic[Microphone] --> Worklet[AudioWorklet]
+    Worklet --> SAB[SharedArrayBuffer]
+    SAB --> Worker[Web Worker]
+    Worker --> Meyda[Meyda MFCC]
+    Worker --> TFJS[TensorFlow.js]
+    TFJS --> Avatar[SVG Avatar]
+```
+
+Authoring guidance:
+
+- Pick the template that fits the moment. Cross-process → sequence. State transitions → state. Component topology → system.
+- Keep node/participant labels short — 1–3 words.
+- One focal diagram per walkthrough is plenty. Two is the maximum unless the mechanism really has two distinct visualizable shapes.
+- If the mechanism's clever bit is data-structure-shaped (bit-packing, packed integers, ring buffer layouts) — **do not invent a diagram for it**. The v1 renderer doesn't support data-structure diagrams. Skip the focal embed and let the prose + code excerpt carry it.
 
 ### Prose discipline
 

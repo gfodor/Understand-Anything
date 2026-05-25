@@ -861,7 +861,127 @@ function EmbedCard({ embed }: { embed: WalkthroughScene["embed"] }) {
   if (!embed) return null;
   if (embed.kind === "beat") return <BeatCard beat={embed} />;
   if (embed.kind === "focal") return <FocalCard focal={embed} />;
-  return <SimCard sim={embed} />;
+  // Simulations are out of scope for v1. The schema still accepts
+  // them; the renderer just skips them silently.
+  return null;
+}
+
+/**
+ * Inline Mermaid renderer. Lazy-loads mermaid (~600KB) on first use
+ * so walkthroughs without diagrams don't pay the cost.
+ */
+function MermaidDiagram({ source }: { source: string }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const idRef = useRef(
+    `mermaid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    (async () => {
+      try {
+        const mermaid = (await import("mermaid")).default;
+        // Theme tuned to match the dashboard's matte ink + tan accent.
+        // Mermaid's themeVariables need hex values, not CSS vars.
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: "loose",
+          theme: "base",
+          fontFamily: '"JetBrains Mono", ui-monospace, Menlo, monospace',
+          themeVariables: {
+            // Backdrop + main canvas
+            background: "transparent",
+            mainBkg: "#1a1a1a",            // --color-elevated
+            secondaryColor: "#141414",      // --color-panel
+            tertiaryColor: "#0a0a0a",       // --color-root
+            // Text
+            textColor: "#f5f0eb",           // --color-text-primary
+            secondaryTextColor: "#a39787",  // --color-text-secondary
+            // Lines + edges
+            lineColor: "#c9a96e",           // --color-accent-dim
+            primaryBorderColor: "#d4a574",  // --color-accent
+            // Primary fills
+            primaryColor: "#1a1a1a",
+            primaryTextColor: "#f5f0eb",
+            // Sequence diagrams
+            actorBkg: "#1a1a1a",
+            actorBorder: "#d4a574",
+            actorTextColor: "#f5f0eb",
+            actorLineColor: "rgba(212, 165, 116, 0.3)",
+            signalColor: "#a39787",
+            signalTextColor: "#f5f0eb",
+            labelBoxBkgColor: "#1a1a1a",
+            labelBoxBorderColor: "#d4a574",
+            labelTextColor: "#f5f0eb",
+            loopTextColor: "#a39787",
+            noteBkgColor: "#0a0a0a",
+            noteBorderColor: "rgba(212, 165, 116, 0.4)",
+            noteTextColor: "#f5f0eb",
+            // State diagrams
+            altBackground: "#141414",
+            // Flowchart / system
+            nodeBkg: "#1a1a1a",
+            nodeBorder: "#d4a574",
+            clusterBkg: "rgba(212, 165, 116, 0.05)",
+            clusterBorder: "rgba(212, 165, 116, 0.25)",
+          },
+        });
+        const { svg } = await mermaid.render(idRef.current, source);
+        if (!cancelled && ref.current) {
+          ref.current.innerHTML = svg;
+          // Make the SVG fit the container width
+          const svgEl = ref.current.querySelector("svg");
+          if (svgEl) {
+            svgEl.setAttribute("width", "100%");
+            svgEl.style.maxWidth = "100%";
+            svgEl.style.height = "auto";
+            svgEl.style.display = "block";
+          }
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
+  if (error) {
+    return (
+      <div
+        style={{
+          padding: "12px 14px",
+          background: "rgba(224, 82, 82, 0.06)",
+          border: "1px solid rgba(224, 82, 82, 0.3)",
+          borderRadius: "3px",
+          color: "var(--color-diff-changed, #e05252)",
+          fontFamily: "var(--font-mono)",
+          fontSize: "0.78rem",
+        }}
+      >
+        Diagram failed to render: {error}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        display: "flex",
+        justifyContent: "center",
+        padding: "8px 0",
+        minHeight: "60px",
+        // Inherits text color so SVG strokes that use currentColor pick it up
+        color: "var(--color-text-primary)",
+      }}
+    />
+  );
 }
 
 function CardShell({
@@ -1085,70 +1205,39 @@ function BeatCard({ beat }: { beat: BeatPlaceholder }) {
   );
 }
 
+// Templates the renderer can actually draw. Other templates declared
+// in the schema (data-structure, metric-strip) are intentionally
+// skipped — no placeholder, just nothing.
+const MERMAID_TEMPLATES: ReadonlyArray<FocalPlaceholder["template"]> = [
+  "sequence-diagram",
+  "state-diagram",
+  "system-diagram",
+];
+
 function FocalCard({ focal }: { focal: FocalPlaceholder }) {
-  return (
-    <CardShell label={`Focal · ${focal.template}`}>
-      <p
-        style={{
-          margin: 0,
-          fontStyle: "italic",
-          color: "var(--color-text-secondary)",
-        }}
-      >
-        {focal.description}
-      </p>
-      {focal.parameters && <ParamsList params={focal.parameters} />}
-    </CardShell>
-  );
-}
+  if (!MERMAID_TEMPLATES.includes(focal.template)) return null;
+  // Convention: agent emits mermaid source under parameters.source.
+  // No source → don't render the card at all. The walkthrough author
+  // prompt enforces this; this is the defensive renderer-side check.
+  const source = focal.parameters?.source;
+  if (!source) return null;
 
-function SimCard({ sim }: { sim: SimPlaceholder }) {
   return (
-    <CardShell label={`Simulation · ${sim.template}`}>
-      <p
-        style={{
-          margin: 0,
-          fontStyle: "italic",
-          color: "var(--color-text-secondary)",
-        }}
-      >
-        {sim.description}
-      </p>
-      {sim.parameters && <ParamsList params={sim.parameters} />}
+    <CardShell label={`Diagram · ${focal.template}`}>
+      {focal.description && (
+        <p
+          style={{
+            margin: "0 0 10px",
+            fontStyle: "italic",
+            color: "var(--color-text-secondary)",
+            fontSize: "0.9rem",
+          }}
+        >
+          {focal.description}
+        </p>
+      )}
+      <MermaidDiagram source={source} />
     </CardShell>
-  );
-}
-
-function ParamsList({ params }: { params: Record<string, string> }) {
-  return (
-    <dl
-      style={{
-        display: "grid",
-        gridTemplateColumns: "max-content 1fr",
-        gap: "4px 16px",
-        marginTop: "10px",
-        fontSize: "0.78rem",
-        fontFamily: "var(--font-mono)",
-        color: "var(--color-text-secondary)",
-      }}
-    >
-      {Object.entries(params).map(([k, v]) => (
-        <div key={k} style={{ display: "contents" }}>
-          <dt
-            style={{
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              fontSize: "0.68rem",
-              color: "var(--color-text-muted)",
-              fontWeight: 500,
-            }}
-          >
-            {k}
-          </dt>
-          <dd style={{ margin: 0 }}>{v}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 
