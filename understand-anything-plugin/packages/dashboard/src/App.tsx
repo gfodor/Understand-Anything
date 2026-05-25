@@ -36,14 +36,14 @@ const OnboardingOverlay = lazy(() => import("./components/OnboardingOverlay"));
 const WalkthroughReader = lazy(() =>
   import("./components/WalkthroughReader").then((m) => ({ default: m.WalkthroughReader })),
 );
-const MechanismsPanel = lazy(() =>
-  import("./components/MechanismsPanel").then((m) => ({ default: m.MechanismsPanel })),
+const MechanismsView = lazy(() =>
+  import("./components/MechanismsView").then((m) => ({ default: m.MechanismsView })),
 );
 
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 const SESSION_TOKEN_KEY = "understand-anything-token";
 const ONBOARDING_DISMISSED_KEY = "ua-onboarding-dismissed-v1";
-type SidebarTab = "info" | "files" | "mechanisms";
+type SidebarTab = "info" | "files";
 
 function shouldShowOnboarding(): boolean {
   if (typeof window === "undefined") return false;
@@ -295,6 +295,7 @@ function DashboardContent({
   const setViewMode = useDashboardStore((s) => s.setViewMode);
   const isKnowledgeGraph = useDashboardStore((s) => s.isKnowledgeGraph);
   const domainGraph = useDashboardStore((s) => s.domainGraph);
+  const mechanismGraph = useDashboardStore((s) => s.mechanismGraph);
   const layoutIssues = useDashboardStore((s) => s.layoutIssues);
   const isMobile = useIsMobile();
   const { t } = useI18n();
@@ -444,7 +445,7 @@ function DashboardContent({
   const sidebarContent = (
     <div className="h-full flex flex-col min-h-0">
       <div className="flex items-center gap-1 p-2 border-b border-border-subtle bg-surface shrink-0">
-        {(["info", "files", "mechanisms"] as const).map((tab) => (
+        {(["info", "files"] as const).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -455,24 +456,12 @@ function DashboardContent({
                 : "text-text-muted hover:text-text-primary hover:bg-elevated"
             }`}
           >
-            {tab === "info"
-              ? t.sidebar.info
-              : tab === "files"
-                ? t.sidebar.files
-                : "Mechanisms"}
+            {tab === "info" ? t.sidebar.info : t.sidebar.files}
           </button>
         ))}
       </div>
       <div className="flex-1 min-h-0 overflow-auto">
-        {sidebarTab === "files" ? (
-          <FileExplorer />
-        ) : sidebarTab === "mechanisms" ? (
-          <Suspense fallback={null}>
-            <MechanismsPanel />
-          </Suspense>
-        ) : (
-          infoSidebarContent
-        )}
+        {sidebarTab === "files" ? <FileExplorer /> : infoSidebarContent}
       </div>
     </div>
   );
@@ -501,22 +490,10 @@ function DashboardContent({
           </h1>
           <div className="w-px h-5 bg-border-subtle hidden sm:block" />
           <PersonaSelector />
-          {graph && !isKnowledgeGraph && domainGraph && (
+          {graph && !isKnowledgeGraph && (domainGraph || mechanismGraph) && (
             <>
               <div className="w-px h-5 bg-border-subtle" />
               <div className="flex items-center bg-elevated rounded-lg p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setViewMode("domain")}
-                  title={t.drawer.domain}
-                  className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                    viewMode === "domain"
-                      ? "bg-accent/20 text-accent"
-                      : "text-text-muted hover:text-text-secondary"
-                  }`}
-                >
-                  {t.drawer.domain}
-                </button>
                 <button
                   type="button"
                   onClick={() => setViewMode("structural")}
@@ -529,6 +506,34 @@ function DashboardContent({
                 >
                   {t.drawer.structural}
                 </button>
+                {domainGraph && (
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("domain")}
+                    title={t.drawer.domain}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                      viewMode === "domain"
+                        ? "bg-accent/20 text-accent"
+                        : "text-text-muted hover:text-text-secondary"
+                    }`}
+                  >
+                    {t.drawer.domain}
+                  </button>
+                )}
+                {mechanismGraph && (
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("mechanisms")}
+                    title="Mechanisms"
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                      viewMode === "mechanisms"
+                        ? "bg-accent/20 text-accent"
+                        : "text-text-muted hover:text-text-secondary"
+                    }`}
+                  >
+                    Mechanisms
+                  </button>
+                )}
               </div>
             </>
           )}
@@ -691,6 +696,10 @@ function DashboardContent({
             <KnowledgeGraphView />
           ) : viewMode === "domain" && domainGraph ? (
             <DomainGraphView />
+          ) : viewMode === "mechanisms" ? (
+            <Suspense fallback={null}>
+              <MechanismsView />
+            </Suspense>
           ) : (
             <GraphView />
           )}

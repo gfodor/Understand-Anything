@@ -286,7 +286,16 @@
         },
         {
           "id": "scene-6",
-          "prose": "Back in call(), after the command function returned, propagation runs. GET is a read; nothing to propagate. (A SET would have called feedAppendOnlyFile to log the command to the AOF buffer and replicationFeedSlaves to broadcast to replicas.) call returns; processCommand returns; processInputBuffer checks if there are more commands in the query buffer (no); readQueryFromClient returns; the event loop continues to the next pending event.\n\nAnd that is how a GET moves through Redis."
+          "prose": "Back in call(), after the command function returned, propagation runs. GET is a read; nothing to propagate. (A SET would have called feedAppendOnlyFile to log the command to the AOF buffer and replicationFeedSlaves to broadcast to replicas.) call returns; processCommand returns; processInputBuffer checks if there are more commands in the query buffer (no); readQueryFromClient returns; the event loop continues to the next pending event.\n\nAnd that is how a GET moves through Redis.",
+          "codeExcerpt": {
+            "path": "src/server.c",
+            "lineRange": [
+              4090,
+              4140
+            ],
+            "highlightLine": 4099,
+            "language": "c"
+          }
         }
       ],
       "pullQuote": "Five files, six function calls, no locks — and that is how a GET moves through Redis.",
