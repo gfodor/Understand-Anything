@@ -127,21 +127,6 @@ function Masthead({ walkthrough }: { walkthrough: Walkthrough }) {
         maxWidth: "880px",
       }}
     >
-      <div
-        style={{
-          fontFamily:
-            '"IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif',
-          fontSize: "0.72rem",
-          fontWeight: 500,
-          letterSpacing: "0.18em",
-          textTransform: "uppercase",
-          color: "var(--accent, #7a2519)",
-          marginBottom: "12px",
-        }}
-      >
-        Walkthrough · {walkthrough.attachedTo.kind} ·{" "}
-        {walkthrough.shape === "recognition" ? "recognition" : "process"}
-      </div>
       <h1
         style={{
           fontSize: "clamp(2.4rem, 5vw, 3.6rem)",
@@ -157,6 +142,7 @@ function Masthead({ walkthrough }: { walkthrough: Walkthrough }) {
         style={{
           fontStyle: "italic",
           fontSize: "1.2rem",
+          lineHeight: 1.45,
           color: "var(--ink-soft, #3a2e23)",
           maxWidth: "44rem",
           margin: 0,
@@ -169,20 +155,42 @@ function Masthead({ walkthrough }: { walkthrough: Walkthrough }) {
 }
 
 function Opening({ walkthrough }: { walkthrough: Walkthrough }) {
+  // The three opening fields are a discipline for the author, not labels
+  // for the reader. Render them as a single flowing opening — three
+  // paragraphs of prose, no headings, with a drop cap on the first to
+  // mark it as the start of the reading.
   return (
     <section
       style={{
-        padding: "32px 64px",
+        padding: "40px 64px 8px",
         maxWidth: "720px",
-        fontSize: "1.05rem",
+        fontSize: "1.1rem",
+        lineHeight: 1.7,
       }}
     >
-      <SectionLabel>The problem</SectionLabel>
-      <p style={{ marginTop: 0 }}>{walkthrough.opening.problem}</p>
-      <SectionLabel>The tease</SectionLabel>
-      <p>{walkthrough.opening.tease}</p>
-      <SectionLabel>The concrete instance</SectionLabel>
-      <p style={{ marginBottom: 0 }}>{walkthrough.opening.concreteInstance}</p>
+      <p
+        style={{
+          margin: "0 0 1.2em",
+          textWrap: "pretty" as React.CSSProperties["textWrap"],
+        }}
+      >
+        <span
+          style={{
+            float: "left",
+            fontFamily: 'inherit',
+            fontWeight: 600,
+            fontSize: "3.4em",
+            lineHeight: 0.92,
+            padding: "0.05em 0.12em 0 0",
+            color: "var(--accent, #7a2519)",
+          }}
+        >
+          {walkthrough.opening.problem.charAt(0)}
+        </span>
+        {walkthrough.opening.problem.slice(1)}
+      </p>
+      <p style={{ margin: "0 0 1.2em" }}>{walkthrough.opening.tease}</p>
+      <p style={{ margin: 0 }}>{walkthrough.opening.concreteInstance}</p>
     </section>
   );
 }
@@ -238,6 +246,9 @@ function SceneBlock({
   pullQuote?: string;
 }) {
   const hasCode = !!scene.codeExcerpt;
+  // The climactic scene is given visual weight (accent rules above and
+  // below) — the typographic treatment is the climax. We do not label it
+  // "climax" in the reader's surface.
   return (
     <article
       style={{
@@ -251,27 +262,36 @@ function SceneBlock({
       }}
     >
       <div style={{ maxWidth: "44rem" }}>
-        <SectionLabel>
+        <div
+          style={{
+            fontFamily:
+              '"IBM Plex Mono", ui-monospace, Menlo, monospace',
+            fontSize: "0.78rem",
+            color: "var(--ink-faint, #978670)",
+            marginBottom: "10px",
+          }}
+        >
           § {index}
-          {scene.isClimax ? " · climax" : ""}
-        </SectionLabel>
+        </div>
         <div
           className="walkthrough-prose"
-          style={{ marginTop: "8px", lineHeight: 1.65 }}
+          style={{ marginTop: "0px", lineHeight: 1.65 }}
         >
           <ReactMarkdown>{scene.prose}</ReactMarkdown>
         </div>
         {scene.isClimax && pullQuote && (
           <blockquote
             style={{
-              fontSize: "1.3rem",
+              fontSize: "1.4rem",
               lineHeight: 1.4,
               fontWeight: 500,
+              fontStyle: "normal",
               color: "var(--ink, #1c1611)",
-              margin: "24px 0",
-              padding: "20px 0",
+              margin: "28px 0 8px",
+              padding: "24px 0",
               borderTop: "1px solid var(--rule, #d5c7a4)",
               borderBottom: "1px solid var(--rule, #d5c7a4)",
+              textWrap: "balance" as React.CSSProperties["textWrap"],
             }}
           >
             {pullQuote}
@@ -531,53 +551,70 @@ function ParamsList({ params }: { params: Record<string, string> }) {
 }
 
 function Coda({ walkthrough }: { walkthrough: Walkthrough }) {
+  // The coda is two things: a closing summary paragraph (reads as the
+  // end of the article, no heading) and a set of review prompts (a
+  // separate genre, mildly chrome-y, so a quiet label is fine there).
   return (
     <footer
       style={{
-        padding: "32px 64px 64px",
-        borderTop: "1px solid var(--rule, #d5c7a4)",
+        padding: "8px 64px 64px",
         maxWidth: "880px",
       }}
     >
-      <SectionLabel>In summary</SectionLabel>
-      <p style={{ marginTop: 0 }}>{walkthrough.coda.summary}</p>
-      <SectionLabel>Review prompts</SectionLabel>
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-          gap: "16px",
-          marginTop: "8px",
+          fontSize: "1.1rem",
+          lineHeight: 1.65,
+          margin: "32px 0 48px",
+          maxWidth: "44rem",
+          textWrap: "pretty" as React.CSSProperties["textWrap"],
         }}
       >
-        {walkthrough.coda.prompts.map((p, i) => (
-          <article
-            key={i}
+        <p style={{ margin: 0 }}>{walkthrough.coda.summary}</p>
+      </div>
+      {walkthrough.coda.prompts.length > 0 && (
+        <>
+          <div
             style={{
-              background: "var(--paper, #f9f4e7)",
-              border: "1px solid var(--rule, #d5c7a4)",
-              borderRadius: "2px",
-              padding: "12px 16px",
+              fontFamily:
+                '"IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif',
+              fontSize: "0.7rem",
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+              color: "var(--ink-mute, #6a5a48)",
+              fontWeight: 600,
+              borderTop: "1px solid var(--rule, #d5c7a4)",
+              paddingTop: "20px",
+              marginBottom: "16px",
             }}
           >
-            <div
-              style={{
-                fontFamily:
-                  '"IBM Plex Sans Condensed", system-ui, sans-serif',
-                fontSize: "0.66rem",
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
-                color: "var(--accent-soft, #a04738)",
-                fontWeight: 600,
-                marginBottom: "6px",
-              }}
-            >
-              {p.type}
-            </div>
-            <p style={{ margin: 0, lineHeight: 1.5 }}>{p.question}</p>
-          </article>
-        ))}
-      </div>
+            Review · {walkthrough.coda.prompts.length} prompt
+            {walkthrough.coda.prompts.length === 1 ? "" : "s"}
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+              gap: "16px",
+              marginTop: "8px",
+            }}
+          >
+            {walkthrough.coda.prompts.map((p, i) => (
+              <article
+                key={i}
+                style={{
+                  background: "var(--paper, #f9f4e7)",
+                  border: "1px solid var(--rule, #d5c7a4)",
+                  borderRadius: "2px",
+                  padding: "12px 16px",
+                }}
+              >
+                <p style={{ margin: 0, lineHeight: 1.5 }}>{p.question}</p>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
     </footer>
   );
 }
