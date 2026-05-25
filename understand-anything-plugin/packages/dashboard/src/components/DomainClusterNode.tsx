@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useCallback } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { useDashboardStore } from "../store";
@@ -20,6 +20,14 @@ function DomainClusterNode({ data }: NodeProps<DomainClusterFlowNode>) {
   const selectNode = useDashboardStore((s) => s.selectNode);
   const isSelected = selectedNodeId === data.domainId;
 
+  const onEnterClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      navigateToDomain(data.domainId);
+    },
+    [data.domainId, navigateToDomain],
+  );
+
   return (
     <div
       className={`rounded-xl border-2 px-5 py-4 min-w-[280px] max-w-[360px] cursor-pointer transition-all ${
@@ -28,7 +36,6 @@ function DomainClusterNode({ data }: NodeProps<DomainClusterFlowNode>) {
           : "border-accent/40 bg-surface hover:border-accent/70"
       }`}
       onClick={() => selectNode(data.domainId)}
-      onDoubleClick={() => navigateToDomain(data.domainId)}
     >
       <Handle type="target" position={Position.Left} className="!bg-accent/60 !w-2 !h-2" />
       <Handle type="source" position={Position.Right} className="!bg-accent/60 !w-2 !h-2" />
@@ -56,8 +63,18 @@ function DomainClusterNode({ data }: NodeProps<DomainClusterFlowNode>) {
         </div>
       )}
 
-      <div className="text-[10px] text-text-muted">
-        {data.flowCount} flow{data.flowCount !== 1 ? "s" : ""}
+      <div className="flex items-center justify-between gap-2 mt-1">
+        <div className="text-[10px] text-text-muted">
+          {data.flowCount} flow{data.flowCount !== 1 ? "s" : ""}
+        </div>
+        <button
+          type="button"
+          onClick={onEnterClick}
+          className="text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded-md bg-accent/15 hover:bg-accent/25 text-accent transition-colors"
+          aria-label={`Open ${data.label} flows`}
+        >
+          Enter →
+        </button>
       </div>
     </div>
   );

@@ -128,10 +128,10 @@ function FileTreeRow({
   return (
     <button
       type="button"
-      onDoubleClick={() => entry.nodeId && openFile(entry.nodeId)}
+      onClick={() => entry.nodeId && openFile(entry.nodeId)}
       className="w-full flex items-center gap-1.5 py-1.5 pr-3 text-left text-xs text-text-secondary hover:text-accent hover:bg-accent/5 transition-colors"
       style={{ paddingLeft }}
-      title={`${entry.path} - double-click to open`}
+      title={entry.path}
     >
       <span className="w-3 text-text-muted">-</span>
       <span className="truncate font-mono">{entry.name}</span>
