@@ -1,0 +1,281 @@
+{
+  "version": "1",
+  "project": {
+    "name": "webspace-engine",
+    "languages": [
+      "JavaScript"
+    ],
+    "frameworks": [
+      "three.js",
+      "A-Frame",
+      "WebGL"
+    ],
+    "description": "A 3D world creation framework that turns standard HTML into immersive 3D environments. The HTML document is both the source of truth and the persistence layer; CSS transforms on tags like <model>, <img>, <video> become world poses.",
+    "analyzedAt": "2026-05-25T00:00:00Z",
+    "gitCommitHash": "spike-fixture"
+  },
+  "generatedAt": "2026-05-25T07:00:00Z",
+  "mechanisms": [
+    {
+      "id": "mechanism:the-split-key",
+      "name": "The Split Key",
+      "kind": "algorithmic",
+      "premise": "Voxel terrain is structurally redundant — wide spans of identically-shaded grass next to other wide spans of identically-shaded grass — and a naïve face-per-voxel renderer would push tens of millions of triangles per frame for a region the GPU could draw as a few hundred quads. The redundancy is obvious to a human looking at the geometry but invisible to the GPU; it has to be found in software, fast enough that the search doesn't consume the frame budget it is trying to save. Greedy meshing is the technique, but its inner loop has only a few hundred instructions per cell. There is no time to read color.",
+      "candidateRecognition": "The mesher does not know it is doing color-aware merging — it is comparing 32-bit integers in a tight inner loop, and the caller's choice of what to pack into those integers (type | r<<8 | g<<16 | b<<24) is the entire algorithm.",
+      "participantNodeIds": [
+        "file:src/terra/mesher.js",
+        "function:src/terra/mesher.js:GreedyMesh",
+        "function:src/terra/chunk.js:getSplitKey",
+        "file:src/terra/chunk.js",
+        "file:src/terra/generator.js"
+      ],
+      "climacticNodeId": "function:src/terra/chunk.js:getSplitKey",
+      "worthWalkthrough": true,
+      "tags": [
+        "voxel",
+        "hot-path",
+        "bit-packing"
+      ],
+      "walkthrough": {
+        "version": "1",
+        "attachedTo": {
+          "kind": "mechanism",
+          "id": "mechanism:the-split-key"
+        },
+        "shape": "recognition",
+        "title": "The Split Key",
+        "subtitle": "Voxel terrain is structurally redundant — but the GPU cannot see redundancy in geometry; software has to find it, fast, every frame. The engine does it in a millisecond, with no color-matching code anywhere in the loop.",
+        "opening": {
+          "problem": "A browser-tab 3D engine renders voxel terrain. Each visible chunk is sixty-four by sixty-four by sixty-four — 262,144 opaque blocks of grass, dirt, stone, water. A naïve face-per-voxel renderer would push tens of millions of triangles for the visible region every frame, and the GPU budget inside a browser is not generous: the GPU is shared with the page compositor, with the document's own rendering, with anyone else who happens to be drawing. Worse, voxel terrain is structurally repetitive — wide spans of identically-shaded surface next to other wide spans of identically-shaded surface — and most of the triangles a naïve renderer would push are visibly redundant. The redundancy is obvious to a human looking at the geometry. It is not obvious to the GPU. Someone has to find it in software, and find it fast enough that the search does not consume the frame budget it is trying to save.",
+          "tease": "The engine collapses each chunk to a few hundred quads in about a millisecond. The function that does it contains no color-matching code anywhere in its inner loop. The choice of *what* to compare turns out to be the entire algorithm — one line of source the second time you read it, invisible the first.",
+          "concreteInstance": "We follow one chunk: the chunk at world index (cx=0, cz=0), seed 42. Inside, on the horizontal plane y=10, there sits a 5×3 rectangle of grass-colored voxels at (x=4..8, z=12..14). All fifteen are the same shade of green: r=78, g=164, b=72. To their right, another patch — same fifteen voxels, same grass type, but each one a slightly different shade because the palette is noise-driven. By the end of this reading, the first patch will become exactly one quad on the GPU. The second will become fifteen."
+        },
+        "scenes": [
+          {
+            "id": "scene-1",
+            "prose": "The first half of greedy meshing is to find the *boundary* between opaque and air. The mesher walks every cell in a y-slice, asks 'is there a voxel here and air above?', and stows the answer in a `mask[n]`. Two parallel arrays: `mask[n]` records whether a face exists at this cell, `vals[n]` records *what kind of face it is*. The vals are integers. The mask is boolean.\n\nWatch this carefully. The values are integers. The sweep below will compare those integer values pairwise: two cells can merge into a single quad if, and only if, they have the same value in `vals`. So the question of which voxels merge has been moved upstream into the question of *what value each cell stores*. The vignette is about to make a great deal out of what is inside `vals[n]`, and the loop that fills it gives nothing away.",
+            "anchorNodeId": "function:src/terra/mesher.js:GreedyMesh",
+            "codeExcerpt": {
+              "path": "src/terra/mesher.js",
+              "lineRange": [
+                4,
+                38
+              ],
+              "language": "javascript"
+            }
+          },
+          {
+            "id": "scene-2",
+            "prose": "The second half is the sweep. Walk the slice row by row. When a cell with `mask[n]` set is found, freeze its value as `cv` and grow a rectangle: extend `w` along the horizontal axis while adjacent cells have `mask` set and value equal to `cv`. Then extend `h` downward for as long as every cell in the next row, across that width, also matches. Emit the rectangle. Zero out the mask under it. Advance past the rectangle's right edge.\n\nFor our patch at (x=4..8, z=12..14), this is the moment fifteen voxels become one quad. The sweep arrives at (i=4, j=12). `mask[n]` is true; `vals[n]` is some integer `K`. Growing width: cells (5, 12), (6, 12), (7, 12), (8, 12) all match `K`. Cell (9, 12) does not. So `w=5`. Growing height: row j=13 matches across width 5; j=14 matches; j=15 does not. So `h=3`. The mesher emits one quad: 5 wide, 3 tall, at the right plane.",
+            "anchorNodeId": "function:src/terra/mesher.js:GreedyMesh",
+            "codeExcerpt": {
+              "path": "src/terra/mesher.js",
+              "lineRange": [
+                42,
+                100
+              ],
+              "language": "javascript"
+            },
+            "embed": {
+              "kind": "beat",
+              "beatType": "predict-outcome",
+              "question": "The neighboring patch — same fifteen voxels at (x=10..14, z=12..14), same grass type, but the palette gave each voxel a slightly different green. What does the sweep emit there?",
+              "candidates": [
+                "1 quad",
+                "3 quads (one per row)",
+                "5 quads (one per column)",
+                "15 quads (one per voxel)"
+              ],
+              "answerIndex": 3,
+              "reveal": "Fifteen quads. The right answer if you have already read the next scene; the wrong one if you haven't. We have not yet told you what is in vals[n]. The beat is the rehearsal.",
+              "windowSeconds": 7
+            }
+          },
+          {
+            "id": "scene-3",
+            "prose": "What the sweep just did is worth pausing on. The value the mask cell carried — the integer the inner loop compared against — was not a boolean dressed up in an `Int32Array`. It was packed. The voxel type sat in the low byte. Red, then green, then blue, occupied the three bytes above it. A single 32-bit integer, written once by a small function in `chunk.js` the mesher never reads.\n\nSo when the inner loop asks whether the cell to the right is the same — `cv === vals[n + w]` — it is asking a single integer equality. Two cells match if and only if they have the same orientation, the same material type, and exactly the same color. The patch of differently-shaded greens next door fragments into fifteen quads. The uniform patch we have been following coalesces into one. The same loop, with no special case for color, does both.\n\nThe line of source code that does this work is short enough to fit on a single line and dense enough that a casual reader will read past it without noticing what just happened. `chunk.voxels[voxel] | (r << 8) | (g << 16) | (b << 24)`. Four bit-shifts and three OR operations. The mesher's claim to color awareness is a fiction maintained by the caller.",
+            "anchorNodeId": "function:src/terra/chunk.js:getSplitKey",
+            "codeExcerpt": {
+              "path": "src/terra/chunk.js",
+              "lineRange": [
+                146,
+                161
+              ],
+              "highlightLine": 160,
+              "language": "javascript"
+            },
+            "isClimax": true
+          },
+          {
+            "id": "scene-4",
+            "prose": "The technique — pack discriminating data into a primitive integer and let the equality operator do dispatch for free — recurs across systems code. Once you have seen it named, it is everywhere: hash table tombstones encoded as a sentinel int value rather than a separate boolean; tagged-pointer GCs that stash the type tag in the bottom bits of an aligned pointer; Linux seqlocks that store 'is-someone-writing' in the low bit of the same counter that records the version. The shape generalizes: when the operation you need (equality, comparison, increment-and-test) already exists as a fast primitive on a single word, you arrange for the *thing you want to compare* to fit in that word, and you let the primitive's hardware path do the algorithm for you.\n\nThe webspace engine's terrain mesher writes a few hundred thousand integers per chunk, compares pairs of them in a tight loop, and ships a few hundred quads. That is the work. Everything else is bookkeeping.",
+            "anchorNodeId": "file:src/terra/mesher.js",
+            "embed": {
+              "kind": "beat",
+              "beatType": "spot-beacon",
+              "question": "Which of these other places in webspace-engine uses the same pattern — discriminating values packed into a primitive integer so equality does structural dispatch for free?",
+              "candidates": [
+                "Terrain height cache key in generator.js (packed (x,z) → int)",
+                "SDS append in edit-ring-manager (buffer resize)",
+                "Voxel delta ring in vox-system (merge revisions)",
+                "Voxmoji alpha-mask hash (silhouette → int)"
+              ],
+              "answerIndex": 0,
+              "reveal": "The height cache. generator.js packs (x+512, z+512) into ((x+512) << 10) | (z+512) — same shape: bit-shift one coordinate into the high bits, OR in the other, get a unique int per (x, z) pair. The voxmoji alpha hash is a near miss (also collapses many bits to one int), but it is summing not packing — collisions are possible by design.",
+              "windowSeconds": 10
+            }
+          },
+          {
+            "id": "scene-5",
+            "prose": "The quad list — for our chunk, a few hundred entries — flows through a protocol-buffer encode, gets stored under the key `\"1/0/42/0/0/1\"` in IndexedDB so the next page load skips the noise sampling entirely, and arrives in the main thread, where an instanced `Terrain` mesh draws every chunk's quads in one call per material. A million voxels' worth of terrain renders at sixty frames per second on a laptop. None of that is interesting. The interesting part — the part that justifies a walkthrough — happened in `chunk.js`, line 160, with an integer.",
+            "anchorNodeId": "file:src/terra/chunk.js"
+          }
+        ],
+        "pullQuote": "The mesher does not know it is doing color-aware merging. It is comparing 32-bit integers in a tight inner loop, and the choice of what to pack into those integers is the entire algorithm.",
+        "coda": {
+          "summary": "Greedy meshing in webspace-engine collapses a chunk of voxels into a small number of quads by sweeping each axis, building a per-slice mask whose value at each cell is a 32-bit integer packing both face type and color, and emitting rectangles wherever adjacent cells have matching values. The mesher does not know about color. The equality test does the work.",
+          "prompts": [
+            {
+              "type": "function-contract",
+              "question": "In chunk.js, what does getSplitKey return when the queried voxel is of type air?"
+            },
+            {
+              "type": "counterfactual",
+              "question": "Suppose getSplitKey were rewritten to return only the voxel type, dropping the color bits. What would the mesher do differently to a noise-jittered patch of fifteen grass voxels?"
+            },
+            {
+              "type": "bit-layout",
+              "question": "In the integer chunk.voxels[voxel] | (r << 8) | (g << 16) | (b << 24), which byte (0–3, where 0 is least significant) holds the green channel?"
+            },
+            {
+              "type": "throughline-retention",
+              "question": "For the patch at (x=4..8, z=12..14, y=10) with seed 42, how many quads does the mesher emit for the top faces of those fifteen voxels?"
+            },
+            {
+              "type": "pattern-recognition",
+              "question": "Name the pattern: a primitive integer is constructed so that the equality operator on those integers does structural dispatch — testing the equality of several fields at once — without any branching code at the comparison site."
+            },
+            {
+              "type": "beacon",
+              "question": "Where else in webspace-engine is a coordinate pair packed into a single integer key by bit-shifting and OR-ing? Cite a file and one approximate line range."
+            }
+          ]
+        },
+        "generatedAt": "2026-05-25T07:30:00Z"
+      }
+    },
+    {
+      "id": "mechanism:the-document",
+      "name": "The Document",
+      "kind": "architectural-elision",
+      "premise": "Every interactive 3D world that has ever shipped has a save function. The user clicks Save, or the engine autosaves; either way, the engine walks its in-memory scene graph and serializes each entity into a save file. The runtime model and the file on disk are two distinct representations of the same state, kept in sync by traversal: a function called serialize goes one way, a function called deserialize goes the other. Around them sits the architectural weight of every game engine, every editor, every world-building tool — schema versioning, format migrations, validation on load, replication for multiplayer.",
+      "candidateRecognition": "There is no serialize function and no deserialize function — the DOM and the HTML file on disk are the same bytes, kept in sync by one MutationObserver and a ten-second timer.",
+      "participantNodeIds": [
+        "file:src/systems/dom-serialize-system.js",
+        "file:src/utils/atom-access-manager.js",
+        "function:src/utils/atom-access-manager.js:MutationObserverCallback",
+        "file:src/writeback/github-writeback.js",
+        "file:src/utils/world-importer.js"
+      ],
+      "climacticNodeId": "function:src/utils/atom-access-manager.js:MutationObserverCallback",
+      "worthWalkthrough": true,
+      "tags": [
+        "dom",
+        "save",
+        "elision"
+      ]
+    },
+    {
+      "id": "mechanism:the-delta-ring",
+      "name": "The Delta Ring",
+      "kind": "protocol",
+      "premise": "Two users edit the same voxel object in their browsers at the same time. There is no central server arbitrating. They exchange edit deltas over WebRTC and each side merges them locally — but merges of merges of merges can keep growing unless someone bounds the history. Most peer-to-peer text editors handle this with CRDTs whose state grows monotonically with edit history. The webspace engine has a different bound.",
+      "candidateRecognition": "The merge history is a fixed-size 32-slot ring buffer; old conflicts silently age off the end, and that is correct because no other peer will ever try to merge against revisions 32-deep.",
+      "participantNodeIds": [
+        "file:src/systems/vox-system.js",
+        "function:src/systems/vox-system.js:performVoxelsConflictResolution",
+        "file:src/utils/edit-ring-manager.js"
+      ],
+      "climacticNodeId": "function:src/systems/vox-system.js:performVoxelsConflictResolution",
+      "worthWalkthrough": true,
+      "tags": [
+        "sync",
+        "ring-buffer",
+        "p2p"
+      ]
+    },
+    {
+      "id": "mechanism:the-toroidal-noise",
+      "name": "The Toroidal Noise",
+      "kind": "algorithmic",
+      "premise": "A finite voxel world that pretends to be infinite needs its terrain to be continuous across the wrap boundary. The naïve approach — sample 2D noise and have it abruptly repeat — produces visible seams a human reader notices instantly. The standard texturing trick of blending two noise samples near the wrap doubles the cost and still leaves a smudge. The webspace engine's wrap is mathematically seamless: the noise field is genuinely continuous across the seam.",
+      "candidateRecognition": "Wrapping 2D noise requires lifting it to a torus; a torus parameterizes naturally into 4D via two cos/sin pairs — which is exactly why every noise call in the terrain generator goes through tiledSimplex into a 4D simplex noise function, not a 2D one.",
+      "participantNodeIds": [
+        "file:src/terra/generator.js",
+        "function:src/terra/generator.js:tiledSimplex",
+        "file:src/systems/wrapped-entity-system.js"
+      ],
+      "climacticNodeId": "function:src/terra/generator.js:tiledSimplex",
+      "worthWalkthrough": true,
+      "tags": [
+        "procedural",
+        "math",
+        "wrap"
+      ]
+    },
+    {
+      "id": "mechanism:the-silhouette-pool",
+      "name": "The Silhouette Pool",
+      "kind": "data-structure",
+      "premise": "A 3D scene with two hundred colored emoji floating in space would naïvely require two hundred draw calls — one per emoji. Browsers run those calls on a shared GPU; the cost adds up fast. Mesh instancing reduces the cost when many copies share the same mesh, but two emoji with different colors don't share a mesh in the obvious sense. The trick is to ask a different question: when do two emoji really differ?",
+      "candidateRecognition": "Two emoji that look totally different to a human can share a mesh if their alpha silhouettes match, and two visually similar emoji with slightly different edges will not — the pool is keyed by silhouette geometry, not by visual appearance, so RGB differences move into a per-instance texture atlas instead of into separate meshes.",
+      "participantNodeIds": [
+        "file:src/systems/voxmoji-system.js"
+      ],
+      "climacticNodeId": "file:src/systems/voxmoji-system.js",
+      "worthWalkthrough": true,
+      "tags": [
+        "render",
+        "batching",
+        "alpha-hash"
+      ]
+    },
+    {
+      "id": "mechanism:the-second-observer",
+      "name": "The Second Observer",
+      "kind": "architectural",
+      "premise": "Once an engine has decided the DOM is its source of truth, what does it do about peers who want to change the source of truth from across a network? The naïve answer is a separate code path for remote updates that wakes up subscribers directly. The webspace engine notices something subtler: a second MutationObserver, watching only document.head for <meta name='webspace.*'> changes, dispatches a hub_meta_refresh event whenever those tags change — whether the local UI changed them or a remote peer pushed an update_hub_meta message that itself just mutates the DOM.",
+      "candidateRecognition": "Local edits and remote edits for hub-level state converge on the same DOM mutation; there is no special 'remote update' code path because the substrate of the convergence is the document itself.",
+      "participantNodeIds": [
+        "file:src/utils/dom-utils.js",
+        "file:src/utils/atom-metadata.js",
+        "file:src/utils/atom-access-manager.js"
+      ],
+      "climacticNodeId": "file:src/utils/atom-metadata.js",
+      "worthWalkthrough": true,
+      "tags": [
+        "dom",
+        "observer",
+        "convergence"
+      ]
+    },
+    {
+      "id": "mechanism:the-cooperative-worker",
+      "name": "The Cooperative Worker",
+      "kind": "architectural",
+      "premise": "Terrain generation and meshing run off the main thread in a Web Worker so the UI stays responsive. But the worker is a single thread, and chunks need different priorities — the chunk under the player's feet matters more than a chunk on the horizon. A normal scheduler would maintain a priority queue and dequeue the min each tick; the webspace worker does something simpler.",
+      "candidateRecognition": "The worker's 'scheduler' is a Map of pending job IDs to priorities; each tick scans the Map for the min-priority entry and runs that one, yielding to the next tick if it isn't yours — a cooperative coroutine pattern where scanning the small Map is cheaper than maintaining a heap.",
+      "participantNodeIds": [
+        "file:src/workers/terra.worker.js",
+        "file:src/terra/chunk.js",
+        "file:src/terra/generator.js"
+      ],
+      "climacticNodeId": "file:src/workers/terra.worker.js",
+      "worthWalkthrough": false,
+      "tags": [
+        "worker",
+        "scheduler"
+      ]
+    }
+  ]
+}

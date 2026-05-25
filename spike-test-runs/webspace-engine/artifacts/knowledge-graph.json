@@ -1,0 +1,260 @@
+{
+  "version": "1.0.0",
+  "kind": "codebase",
+  "project": {
+    "name": "webspace-engine",
+    "languages": ["JavaScript"],
+    "frameworks": ["three.js", "A-Frame", "WebGL"],
+    "description": "A 3D world creation framework that turns standard HTML into immersive 3D environments. The HTML document is both the source of truth and the persistence layer; CSS transforms on tags like <model>, <img>, <video> become world poses.",
+    "analyzedAt": "2026-05-25T00:00:00Z",
+    "gitCommitHash": "spike-fixture"
+  },
+  "nodes": [
+    {
+      "id": "document:README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "README.md",
+      "summary": "Project README. Pitches the engine as 'edit an HTML file as a 3D world.' Highlights: HTML document is the source of truth and persistence layer; CSS transforms on <model> tags carry pose; toroidal wrapped world; vox editing with peer presence; emoji rendered as extruded voxmoji meshes; greedy meshing collapses voxel chunks. Describes the FastNoise + chunked terrain generator.",
+      "tags": ["overview"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:doc/todo.txt",
+      "type": "document",
+      "name": "todo.txt",
+      "filePath": "doc/todo.txt",
+      "summary": "Author's working notes. Hints at design choices in the smoothvoxels mesher, the WebRTC delta sync, the voxmoji alpha hash. Mentions 'smooth voxel mesher is randomized' as a known issue and references the toroidal world wrap.",
+      "tags": ["notes"],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:src/terra/mesher.js",
+      "type": "file",
+      "name": "mesher.js",
+      "filePath": "src/terra/mesher.js",
+      "lineRange": [1, 460],
+      "summary": "Greedy mesher for voxel terrain. The function GreedyMesh sweeps three axes, builds a 2D boundary mask per slice, and emits axis-aligned quads by lexicographic run-length expansion. Crucially the mask stores integers from a caller-provided getSplitKey function — not booleans — so the inner equality test (cv === vals[n + w]) does whatever discrimination the caller packed into those integers. Max quad size capped at 12 to prevent seams when curving.",
+      "tags": ["voxel", "geometry", "hot-path"],
+      "complexity": "complex",
+      "languageNotes": "The trick: mesher does not know about color. Caller decides what to pack."
+    },
+    {
+      "id": "function:src/terra/mesher.js:GreedyMesh",
+      "type": "function",
+      "name": "GreedyMesh",
+      "filePath": "src/terra/mesher.js",
+      "lineRange": [4, 104],
+      "summary": "Three-axis sweep of a voxel chunk. For each axis, builds two parallel Int32Arrays: mask[n] = whether there is a face here (boundary cell), vals[n] = the discriminating integer the caller chose to attach to that face. Then walks the mask lexicographically and grows rectangles: width extends while mask[n+w] is set and vals match; height extends row-by-row checking the same. Emits one quad per maximal rectangle, zeros the mask under it. The whole color-aware merging story lives in two equality tests on vals.",
+      "tags": ["voxel", "merging", "hot-path", "non-obvious"],
+      "complexity": "complex",
+      "languageNotes": "The clever bit is that the loop never inspects color; it compares integers from getSplitKey."
+    },
+    {
+      "id": "function:src/terra/chunk.js:getSplitKey",
+      "type": "function",
+      "name": "getSplitKey",
+      "filePath": "src/terra/chunk.js",
+      "lineRange": [146, 161],
+      "summary": "Constructs a 32-bit integer per voxel that packs type in the low byte and r, g, b in successive bytes: chunk.voxels[voxel] | (r << 8) | (g << 16) | (b << 24). Returns 0 for air (which the mesher reads as 'no face here'). This is the function passed as the split-key callback to GreedyMesh. The mesher's equality test on these integers does color-aware face merging without any color-comparison code.",
+      "tags": ["bit-packing", "hot-path"],
+      "complexity": "moderate",
+      "languageNotes": "Cleverness: a single shift-and-OR sequence stores all face-identity bits in one int."
+    },
+    {
+      "id": "file:src/terra/chunk.js",
+      "type": "file",
+      "name": "chunk.js",
+      "filePath": "src/terra/chunk.js",
+      "lineRange": [1, 220],
+      "summary": "Storage layout for one 64x64x64 voxel chunk. Backing storage is one Uint8Array of length 64^3 * 8 = ~2 MiB. Eight bytes per voxel: type, r, g, b, lr (low-LOD r), lg, lb, palette. The Mesher() constructor in this file wires up getType/getColor/getSplitKey/getPalette callbacks the mesher then calls per-cell.",
+      "tags": ["storage", "voxel"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/terra/generator.js",
+      "type": "file",
+      "name": "generator.js",
+      "filePath": "src/terra/generator.js",
+      "lineRange": [1, 320],
+      "summary": "Procedural terrain generator. Uses FastNoise + a tiledSimplex projection that lifts 2D (x,z) coordinates onto a 4D simplex via (cos, sin) pairs — the trick that lets the toroidal world wrap seamlessly. Computes plateau / bridge / terrain heights, picks colors from a per-cell noise of the palette. The 4D simplex is the entire reason the noise is continuous across the wrap.",
+      "tags": ["procedural", "noise", "tiled"],
+      "complexity": "complex",
+      "languageNotes": "Wrapping 2D noise requires lifting to a torus; cos/sin parameterizes that as 4D."
+    },
+    {
+      "id": "function:src/terra/generator.js:tiledSimplex",
+      "type": "function",
+      "name": "tiledSimplex",
+      "filePath": "src/terra/generator.js",
+      "lineRange": [95, 104],
+      "summary": "tiledSimplex(x, z, x1, x2, z1, z2) returns the magnitude of a 4D simplex noise sample where the 4 coordinates are derived by remapping x and z through COS_TABLE and SIN_TABLE. Effectively projects 2D coordinates onto a torus before sampling, which is the mathematical reason the terrain has no visible seam at the wrap boundary.",
+      "tags": ["procedural", "noise", "wrap"],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:src/systems/dom-serialize-system.js",
+      "type": "file",
+      "name": "dom-serialize-system.js",
+      "filePath": "src/systems/dom-serialize-system.js",
+      "lineRange": [1, 500],
+      "summary": "Every 250 ms (FLUSH_DELAY), this system polls every registered entity's object3D matrix. When matrix is dirty (set by user drag), it decomposes pos/rot/scale and writes a CSS transform: translate3d(...) string into the matching DOM element's style attribute via setAttributeIfChanged. There is no model layer; the DOM is the model.",
+      "tags": ["dom", "save", "interval"],
+      "complexity": "moderate",
+      "languageNotes": "Producer of DOM mutations that the persistence MutationObserver later consumes."
+    },
+    {
+      "id": "file:src/utils/atom-access-manager.js",
+      "type": "file",
+      "name": "atom-access-manager.js",
+      "filePath": "src/utils/atom-access-manager.js",
+      "lineRange": [1, 700],
+      "summary": "Hosts the engine's persistence-side MutationObserver. Observes document.documentElement with subtree+childList+attributes+characterData all true. Filters out styled-components <style> removals; any other mutation sets documentIsDirty = true, dispatches a 'document-dirty-state-changed' CustomEvent, and schedules a setTimeout(write, MAX_WRITE_RATE_MS=10000) — the entire save subsystem. write() base64-encodes documentElement.outerHTML and POSTs to GitHub.",
+      "tags": ["dom", "save", "observer", "no-save-function"],
+      "complexity": "complex",
+      "languageNotes": "Cleverness: there is no serialize function. The DOM is the file. The observer + 10s debounce is the whole save subsystem."
+    },
+    {
+      "id": "function:src/utils/atom-access-manager.js:MutationObserverCallback",
+      "type": "function",
+      "name": "AtomAccessManager.mutationObserver",
+      "filePath": "src/utils/atom-access-manager.js",
+      "lineRange": [170, 231],
+      "summary": "The MutationObserver callback that does the entire persistence triage. Walks each MutationRecord, ignores styled-components <style> removals, and on any other mutation sets dirty=true and schedules write 10s out. write() serializes documentElement.outerHTML and uploads it to GitHub via 4 REST API calls (blob, tree, commit, ref). No diff, no patch format.",
+      "tags": ["observer", "save", "no-save-function"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/utils/world-importer.js",
+      "type": "file",
+      "name": "world-importer.js",
+      "filePath": "src/utils/world-importer.js",
+      "lineRange": [1, 250],
+      "summary": "The 'load' side of the persistence story. There is no deserialize function: the browser parses the HTML, and this WorldImporter walks document.body's children, reads transform out of each tag's style, and spawns the corresponding A-Frame entity at the parsed position. The fact that there's no symmetric load function is the design.",
+      "tags": ["dom", "load", "no-load-function"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/systems/vox-system.js",
+      "type": "file",
+      "name": "vox-system.js",
+      "filePath": "src/systems/vox-system.js",
+      "lineRange": [1, 2500],
+      "summary": "Voxel object subsystem. Hosts a 32-slot ring buffer (DELTA_RING_BUFFER_LENGTH=32) for delta sync. Conflict resolution: peers exchange voxel-painting deltas over WebRTC; each entry in the ring buffer holds a finalized delta at a particular revision. When a remote delta arrives, the system walks the ring oldest-first and commutatively merges via Voxels.mergeWith for any same-revision entries; the tiebreak is deterministic by revision ordering. There is no separate journal — the ring is the merge history.",
+      "tags": ["sync", "ring-buffer", "convergence"],
+      "complexity": "complex",
+      "languageNotes": "Cleverness: a fixed-size ring carries the entire merge history; old conflicts age off the end and that is correct because no one will merge against revisions 32-deep."
+    },
+    {
+      "id": "function:src/systems/vox-system.js:performVoxelsConflictResolution",
+      "type": "function",
+      "name": "performVoxelsConflictResolution",
+      "filePath": "src/systems/vox-system.js",
+      "lineRange": [2351, 2400],
+      "summary": "The convergent conflict resolution for voxel painting. Walks the 32-slot ring buffer oldest-first; for slots at the same revision as the incoming delta, calls voxels.mergeWith(...) with a stable targetAlwaysWins = ringRevision > revision tiebreak. The finalized merged voxels are then written into the ring at deltaRingIndex and the cursor advances.",
+      "tags": ["sync", "convergence", "non-obvious"],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:src/utils/edit-ring-manager.js",
+      "type": "file",
+      "name": "edit-ring-manager.js",
+      "filePath": "src/utils/edit-ring-manager.js",
+      "lineRange": [1, 400],
+      "summary": "Presence / handshake for collaborative editing. Manages joining the sync ring, requesting initial doc snapshots from existing members, deciding genesis (when no one else is present). For cold-start races where two clients independently become genesis: the tiebreak is clientId > NAF.clientId — whichever client has the numerically larger client ID becomes authoritative; the other requests a full doc and discards its own work.",
+      "tags": ["sync", "presence", "tiebreak"],
+      "complexity": "complex",
+      "languageNotes": "A single inequality is the entire cold-start tiebreak."
+    },
+    {
+      "id": "file:src/systems/voxmoji-system.js",
+      "type": "file",
+      "name": "voxmoji-system.js",
+      "filePath": "src/systems/voxmoji-system.js",
+      "lineRange": [1, 700],
+      "summary": "Renders emoji as 3D extruded meshes. When the user types an emoji into the DOM, the system rasterizes its SVG, computes an alpha-mask hash from the binary pixel coverage, and uses that hash to pool meshes: emoji with identical alpha silhouettes share a single 3D mesh and instanced draw call, even when their colors differ. RGB differences are stored in a per-instance 4x4 texture atlas. Result: 200 colored smiley emoji become one draw call.",
+      "tags": ["render", "batching", "alpha-hash"],
+      "complexity": "complex",
+      "languageNotes": "Cleverness: mesh sharing keyed by silhouette, not by visual appearance."
+    },
+    {
+      "id": "file:src/systems/wrapped-entity-system.js",
+      "type": "file",
+      "name": "wrapped-entity-system.js",
+      "filePath": "src/systems/wrapped-entity-system.js",
+      "lineRange": [1, 400],
+      "summary": "Toroidal world wrap. The world is a finite 8-chunk x 64-voxel grid (512 m square) but the player walks infinitely. Each frame, wrappable scene objects get repositioned to whichever of nine candidate world-space copies (a 3x3 lattice) is closest to the player. Combined with the 4D simplex noise in generator.js the world feels continuous.",
+      "tags": ["wrap", "scene"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/writeback/github-writeback.js",
+      "type": "file",
+      "name": "github-writeback.js",
+      "filePath": "src/writeback/github-writeback.js",
+      "lineRange": [1, 400],
+      "summary": "The 'save to disk' implementation. Takes a full HTML string and writes it to a GitHub repository via four API calls: POST git/blobs, POST git/trees, POST git/commits, PATCH git/refs. No diff is computed. The whole file becomes a new whole file. Used only when atom-access-manager's debounce fires.",
+      "tags": ["save", "github"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/workers/terra.worker.js",
+      "type": "file",
+      "name": "terra.worker.js",
+      "filePath": "src/workers/terra.worker.js",
+      "lineRange": [1, 200],
+      "summary": "Web Worker that runs the terrain generator and mesher off the main thread. Maintains a jobPriorities Map; each tick scans for the min-priority pending job and runs that one, yielding to the next tick otherwise. Effectively a cooperative coroutine scheduler. Caches finished chunks in IndexedDB so subsequent loads skip noise sampling.",
+      "tags": ["worker", "scheduler"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/utils/dom-utils.js",
+      "type": "file",
+      "name": "dom-utils.js",
+      "filePath": "src/utils/dom-utils.js",
+      "lineRange": [1, 600],
+      "summary": "Misc DOM helpers including pushHubMetaUpdateIntoDOM. When a peer broadcasts an update_hub_meta message, this writes the change into <head>'s <meta> tags — and a SECOND MutationObserver in atom-metadata.js fires on those changes and dispatches hub_meta_refresh, which fans out to atmosphere/sky/spawn-point subscribers. Local and remote hub-metadata changes converge at the same line of code.",
+      "tags": ["dom", "convergence", "observer"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/utils/atom-metadata.js",
+      "type": "file",
+      "name": "atom-metadata.js",
+      "filePath": "src/utils/atom-metadata.js",
+      "lineRange": [1, 350],
+      "summary": "The second MutationObserver in the codebase. Watches document.head for <meta name='webspace.*'> changes and dispatches a hub_meta_refresh CustomEvent that drives the atmosphere, sky color, spawn point. Used by both local UI changes and remote peer updates.",
+      "tags": ["dom", "observer", "hub-meta"],
+      "complexity": "moderate"
+    }
+  ],
+  "edges": [
+    {"source": "function:src/terra/chunk.js:getSplitKey", "target": "function:src/terra/mesher.js:GreedyMesh", "type": "calls", "direction": "forward", "weight": 0.9},
+    {"source": "function:src/terra/generator.js:tiledSimplex", "target": "file:src/terra/chunk.js", "type": "calls", "direction": "forward", "weight": 0.6},
+    {"source": "file:src/terra/chunk.js", "target": "file:src/terra/mesher.js", "type": "calls", "direction": "forward", "weight": 0.9},
+    {"source": "file:src/terra/generator.js", "target": "file:src/terra/chunk.js", "type": "calls", "direction": "forward", "weight": 0.8},
+    {"source": "file:src/workers/terra.worker.js", "target": "file:src/terra/chunk.js", "type": "calls", "direction": "forward", "weight": 0.7},
+    {"source": "file:src/workers/terra.worker.js", "target": "file:src/terra/generator.js", "type": "calls", "direction": "forward", "weight": 0.7},
+    {"source": "file:src/systems/wrapped-entity-system.js", "target": "file:src/terra/generator.js", "type": "depends_on", "direction": "forward", "weight": 0.5},
+    {"source": "file:src/systems/dom-serialize-system.js", "target": "file:src/utils/atom-access-manager.js", "type": "triggers", "direction": "forward", "weight": 0.9},
+    {"source": "function:src/utils/atom-access-manager.js:MutationObserverCallback", "target": "file:src/writeback/github-writeback.js", "type": "calls", "direction": "forward", "weight": 0.9},
+    {"source": "file:src/utils/atom-access-manager.js", "target": "function:src/utils/atom-access-manager.js:MutationObserverCallback", "type": "contains", "direction": "forward", "weight": 1.0},
+    {"source": "file:src/utils/world-importer.js", "target": "file:src/utils/atom-access-manager.js", "type": "related", "direction": "forward", "weight": 0.6},
+    {"source": "file:src/systems/vox-system.js", "target": "function:src/systems/vox-system.js:performVoxelsConflictResolution", "type": "contains", "direction": "forward", "weight": 1.0},
+    {"source": "file:src/utils/edit-ring-manager.js", "target": "file:src/systems/vox-system.js", "type": "triggers", "direction": "forward", "weight": 0.7},
+    {"source": "file:src/utils/atom-metadata.js", "target": "file:src/utils/dom-utils.js", "type": "subscribes", "direction": "backward", "weight": 0.7},
+    {"source": "file:src/utils/dom-utils.js", "target": "file:src/utils/atom-metadata.js", "type": "publishes", "direction": "forward", "weight": 0.7},
+    {"source": "document:README.md", "target": "file:src/terra/mesher.js", "type": "documents", "direction": "forward", "weight": 0.5},
+    {"source": "document:README.md", "target": "file:src/utils/atom-access-manager.js", "type": "documents", "direction": "forward", "weight": 0.5},
+    {"source": "document:README.md", "target": "file:src/systems/vox-system.js", "type": "documents", "direction": "forward", "weight": 0.5},
+    {"source": "document:doc/todo.txt", "target": "file:src/terra/mesher.js", "type": "documents", "direction": "forward", "weight": 0.4},
+    {"source": "document:doc/todo.txt", "target": "file:src/systems/vox-system.js", "type": "documents", "direction": "forward", "weight": 0.4}
+  ],
+  "layers": [
+    {"id": "layer:terra", "name": "Terrain & voxel meshing", "description": "Procedural terrain generator + greedy mesher + worker", "nodeIds": ["file:src/terra/mesher.js", "function:src/terra/mesher.js:GreedyMesh", "function:src/terra/chunk.js:getSplitKey", "file:src/terra/chunk.js", "file:src/terra/generator.js", "function:src/terra/generator.js:tiledSimplex", "file:src/workers/terra.worker.js"]},
+    {"id": "layer:dom-persistence", "name": "DOM-as-storage", "description": "The save/load subsystem (which is mostly the DOM and a MutationObserver)", "nodeIds": ["file:src/systems/dom-serialize-system.js", "file:src/utils/atom-access-manager.js", "function:src/utils/atom-access-manager.js:MutationObserverCallback", "file:src/utils/world-importer.js", "file:src/writeback/github-writeback.js", "file:src/utils/dom-utils.js", "file:src/utils/atom-metadata.js"]},
+    {"id": "layer:sync", "name": "Collaborative editing", "description": "WebRTC-driven sync ring + voxel conflict resolution", "nodeIds": ["file:src/systems/vox-system.js", "function:src/systems/vox-system.js:performVoxelsConflictResolution", "file:src/utils/edit-ring-manager.js"]},
+    {"id": "layer:rendering", "name": "Rendering subsystems", "description": "Voxmoji emoji rendering, wrapped entity teleportation", "nodeIds": ["file:src/systems/voxmoji-system.js", "file:src/systems/wrapped-entity-system.js"]}
+  ],
+  "tour": []
+}
