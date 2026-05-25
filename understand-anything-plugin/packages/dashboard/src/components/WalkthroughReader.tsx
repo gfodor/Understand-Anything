@@ -81,12 +81,12 @@ export function WalkthroughReader() {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(15, 18, 22, 0.78)",
+        background: "rgba(15, 18, 22, 0.82)",
         zIndex: 1000,
         display: "flex",
         alignItems: "stretch",
         justifyContent: "center",
-        padding: "24px",
+        padding: "16px",
       }}
     >
       <div
@@ -95,7 +95,7 @@ export function WalkthroughReader() {
         style={{
           background: "var(--paper, #f9f4e7)",
           color: "var(--ink, #1c1611)",
-          width: "min(1280px, 100%)",
+          width: "min(1680px, calc(100vw - 32px))",
           height: "100%",
           borderRadius: "4px",
           boxShadow: "0 24px 80px rgba(0,0,0,0.4)",
@@ -256,7 +256,10 @@ function ScenesWithStickyCode({
     return Array.from(seen.entries()).map(([k, excerpt]) => ({ key: k, excerpt }));
   }, [walkthrough]);
 
-  // For each scene that has a code excerpt, which excerpt key does it map to?
+  // For each scene that has a code excerpt, which excerpt key does it
+  // map to? Scenes without a codeExcerpt fall back to whatever the
+  // scroll-active scene already showed (we don't track them here, the
+  // resolver does — see resolveActiveExcerptKey below).
   const sceneToExcerptKey = useMemo(() => {
     const m = new Map<string, string>();
     for (const scene of walkthrough.scenes) {
@@ -266,6 +269,26 @@ function ScenesWithStickyCode({
     }
     return m;
   }, [walkthrough]);
+
+  // Resolve a scene id to the excerpt key that should be visible. If
+  // the scene has its own excerpt, use that. Otherwise fall back to
+  // the nearest *preceding* scene with one — so reading prose-only
+  // scenes still leaves the prior section's code visible.
+  const resolveExcerptForScene = useCallback(
+    (sceneId: string | null): string | null => {
+      if (!sceneId) return null;
+      const direct = sceneToExcerptKey.get(sceneId);
+      if (direct) return direct;
+      const scenes = walkthrough.scenes;
+      const idx = scenes.findIndex((s) => s.id === sceneId);
+      for (let i = idx - 1; i >= 0; i--) {
+        const k = sceneToExcerptKey.get(scenes[i].id);
+        if (k) return k;
+      }
+      return uniqueExcerpts[0]?.key ?? null;
+    },
+    [sceneToExcerptKey, walkthrough.scenes, uniqueExcerpts]
+  );
 
   // Fetch each unique source file once. Cache by path.
   const [files, setFiles] = useState<Record<string, FetchState>>({});
@@ -322,29 +345,42 @@ function ScenesWithStickyCode({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uniqueExcerpts]);
 
-  // Track which scene is currently "active" — the topmost scene whose
-  // top crosses our trigger band. We watch all scenes that have a code
-  // excerpt (scenes without one keep the previous excerpt visible).
+  // Two parallel tracks for "which scene is the user reading":
+  //   scrollSceneId — derived from IntersectionObserver, the topmost
+  //     scene crossing the trigger band.
+  //   hoverSceneId — the scene the user is currently pointing at.
+  // Hover wins. Move the cursor away (or out of any scene), scroll
+  // wins again. This matches the affordance most text+figure essays
+  // use: scroll is the default, hover is the override.
   const sceneRefs = useRef<Map<string, HTMLElement | null>>(new Map());
-  const [activeExcerptKey, setActiveExcerptKey] = useState<string | null>(
-    () => (uniqueExcerpts[0]?.key ?? null)
+  const [scrollSceneId, setScrollSceneId] = useState<string | null>(
+    () => walkthrough.scenes[0]?.id ?? null
   );
+  const [hoverSceneId, setHoverSceneId] = useState<string | null>(null);
+  const activeSceneId = hoverSceneId ?? scrollSceneId;
+  const activeExcerptKey = resolveExcerptForScene(activeSceneId);
 
   const observeScene = useCallback((id: string, el: HTMLElement | null) => {
     if (el) sceneRefs.current.set(id, el);
     else sceneRefs.current.delete(id);
   }, []);
 
+  const handleSceneHover = useCallback((id: string) => {
+    setHoverSceneId(id);
+  }, []);
+  const handleSceneUnhover = useCallback((id: string) => {
+    setHoverSceneId((current) => (current === id ? null : current));
+  }, []);
+
   useEffect(() => {
     const root = scrollContainer.current;
     if (!root) return;
-    const scenesWithCode = walkthrough.scenes.filter((s) => s.codeExcerpt);
-    if (scenesWithCode.length === 0) return;
+    if (walkthrough.scenes.length === 0) return;
 
-    // The "active" scene is whichever has its top closest to the upper
-    // third of the scroll container. Using rootMargin pulls the trigger
-    // band up so the active code reflects what the reader is *reading*,
-    // not what's about to enter.
+    // We observe *every* scene now, not just ones with code, because
+    // the active state also drives the visible highlight on the prose
+    // side. resolveExcerptForScene handles fallback for prose-only
+    // scenes.
     const observer = new IntersectionObserver(
       (entries) => {
         const visible = entries
@@ -356,9 +392,7 @@ function ScenesWithStickyCode({
         if (visible.length === 0) return;
         const top = visible[0];
         const sceneId = (top.target as HTMLElement).dataset.sceneId;
-        if (!sceneId) return;
-        const key = sceneToExcerptKey.get(sceneId);
-        if (key) setActiveExcerptKey(key);
+        if (sceneId) setScrollSceneId(sceneId);
       },
       {
         root,
@@ -367,13 +401,13 @@ function ScenesWithStickyCode({
       }
     );
 
-    for (const scene of scenesWithCode) {
+    for (const scene of walkthrough.scenes) {
       const el = sceneRefs.current.get(scene.id);
       if (el) observer.observe(el);
     }
     return () => observer.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [walkthrough, sceneToExcerptKey, scrollContainer.current]);
+  }, [walkthrough, scrollContainer.current]);
 
   return (
     <div
@@ -381,12 +415,13 @@ function ScenesWithStickyCode({
         display: "grid",
         gridTemplateColumns:
           uniqueExcerpts.length > 0
-            ? "minmax(0, 1.05fr) minmax(0, 1fr)"
+            ? "minmax(0, 1fr) minmax(0, 1.3fr)"
             : "1fr",
-        gap: "32px",
-        padding: "16px 64px 16px",
+        columnGap: "40px",
+        padding: "16px 40px 16px",
         alignItems: "start",
       }}
+      onMouseLeave={() => setHoverSceneId(null)}
     >
       <div>
         {walkthrough.scenes.map((scene, i) => (
@@ -395,7 +430,10 @@ function ScenesWithStickyCode({
             scene={scene}
             index={i + 1}
             pullQuote={walkthrough.pullQuote}
+            isActive={scene.id === activeSceneId}
             registerRef={observeScene}
+            onHover={handleSceneHover}
+            onUnhover={handleSceneUnhover}
           />
         ))}
       </div>
@@ -414,27 +452,45 @@ function SceneProse({
   scene,
   index,
   pullQuote,
+  isActive,
   registerRef,
+  onHover,
+  onUnhover,
 }: {
   scene: WalkthroughScene;
   index: number;
   pullQuote?: string;
+  isActive: boolean;
   registerRef: (id: string, el: HTMLElement | null) => void;
+  onHover: (id: string) => void;
+  onUnhover: (id: string) => void;
 }) {
   return (
     <article
       ref={(el) => registerRef(scene.id, el)}
       data-scene-id={scene.id}
+      onMouseEnter={() => onHover(scene.id)}
+      onMouseLeave={() => onUnhover(scene.id)}
       style={{
+        position: "relative",
         maxWidth: "44rem",
-        marginBottom: "44px",
-        padding: scene.isClimax ? "32px 0" : 0,
+        marginBottom: "16px",
+        padding: scene.isClimax ? "28px 16px" : "20px 16px",
+        marginLeft: "-16px",
+        marginRight: "-16px",
         borderTop: scene.isClimax
           ? "1px solid var(--accent, #7a2519)"
           : "none",
         borderBottom: scene.isClimax
           ? "1px solid var(--accent, #7a2519)"
           : "none",
+        borderLeft: isActive
+          ? "2px solid var(--accent, #7a2519)"
+          : "2px solid transparent",
+        background: isActive ? "rgba(122, 37, 25, 0.04)" : "transparent",
+        borderRadius: "2px",
+        transition:
+          "background-color 220ms ease, border-color 220ms ease",
         scrollMarginTop: "30vh",
       }}
     >
