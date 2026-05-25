@@ -425,7 +425,19 @@ function ScenesWithStickyCode({
       }}
       onMouseLeave={() => setHoverSceneId(null)}
     >
-      <div>
+      <div
+        style={{
+          // Overscroll. The sticky code pane is ~calc(100vh - 96px) tall;
+          // when the prose column ends, the grid row ends, the aside
+          // ends, and the sticky element detaches and rides the
+          // containing block's bottom upward — pushing the code excerpt
+          // above the modal's top while the reader is still on the last
+          // scene. Extending the prose column by a viewport-and-change
+          // gives the sticky enough runway to remain pinned at top:12px
+          // through every scene, including the last.
+          paddingBottom: "80vh",
+        }}
+      >
         {walkthrough.scenes.map((scene, i) => (
           <SceneProse
             key={scene.id}
