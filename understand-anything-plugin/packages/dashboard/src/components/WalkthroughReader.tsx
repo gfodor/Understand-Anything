@@ -68,29 +68,47 @@ export function WalkthroughReader() {
 
   // Browser/host Back button closes the walkthrough.
   //
-  // On open, push a synthetic history entry so a Back press doesn't
-  // navigate away from the dashboard — it instead pops our entry and
-  // we treat that as a close. On close from any other path (X, Escape,
-  // backdrop click), we call history.back() ourselves to remove the
-  // entry from the stack so the user doesn't have a leftover "ghost"
-  // state to back through.
+  // Drive history mutations off the real open transition, not off the
+  // effect cleanup. Cleanups also fire on Strict Mode re-mounts and on
+  // dependency changes — calling history.back() in cleanup
+  // unconditionally caused the modal to flash open then immediately
+  // close, because the back nav fired popstate after the listener was
+  // re-installed on the second mount.
+  //
+  // Refs persist across re-mounts, so we can detect the actual
+  // false→true and true→false transitions and only push/pop once each.
+  const pushedHistoryRef = useRef(false);
+  const poppedByUserRef = useRef(false);
+
+  useEffect(() => {
+    // false → true transition
+    if (open && !pushedHistoryRef.current) {
+      pushedHistoryRef.current = true;
+      poppedByUserRef.current = false;
+      window.history.pushState({ walkthroughOpen: true }, "");
+    }
+    // true → false transition
+    if (!open && pushedHistoryRef.current) {
+      pushedHistoryRef.current = false;
+      if (!poppedByUserRef.current) {
+        // Close came from inside the app (X / Escape / backdrop) and
+        // not from the user pressing Back. Pop our synthetic entry.
+        window.history.back();
+      }
+    }
+  }, [open]);
+
+  // popstate listener — only active while the modal is open.
   useEffect(() => {
     if (!open) return;
-    let closedByPopState = false;
-    window.history.pushState({ walkthroughOpen: true }, "");
     const onPopState = () => {
-      closedByPopState = true;
+      // User pressed Back. Mark so the transition effect doesn't
+      // also call history.back() (the browser already navigated).
+      poppedByUserRef.current = true;
       close();
     };
     window.addEventListener("popstate", onPopState);
-    return () => {
-      window.removeEventListener("popstate", onPopState);
-      if (!closedByPopState) {
-        // Close came from inside the app (Escape / X / backdrop).
-        // Pop our pushed entry so the back stack stays clean.
-        window.history.back();
-      }
-    };
+    return () => window.removeEventListener("popstate", onPopState);
   }, [open, close]);
 
   useEffect(() => {

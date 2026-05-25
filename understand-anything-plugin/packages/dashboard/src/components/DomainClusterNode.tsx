@@ -70,7 +70,7 @@ function DomainClusterNode({ data }: NodeProps<DomainClusterFlowNode>) {
         <button
           type="button"
           onClick={onEnterClick}
-          className="text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded-md bg-accent/15 hover:bg-accent/25 text-accent transition-colors"
+          className="text-[10px] font-semibold uppercase tracking-wider cursor-pointer px-2 py-1 rounded-md bg-accent/15 hover:bg-accent/25 text-accent transition-colors"
           aria-label={`Open ${data.label} flows`}
         >
           Enter →

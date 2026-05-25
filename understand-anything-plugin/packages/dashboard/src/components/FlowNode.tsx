@@ -64,7 +64,7 @@ function FlowNode({ data }: NodeProps<FlowFlowNode>) {
           <button
             type="button"
             onClick={onReadClick}
-            className="inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-accent text-white hover:bg-accent/90"
+            className="inline-flex items-center gap-1 cursor-pointer text-[9px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-accent text-white hover:bg-accent/90"
             aria-label={`Open walkthrough: ${walkthrough.title}`}
           >
             <svg

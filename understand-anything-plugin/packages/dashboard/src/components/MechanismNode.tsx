@@ -82,7 +82,7 @@ function MechanismNode({ data }: NodeProps<MechanismFlowNode>) {
           <button
             type="button"
             onClick={onReadClick}
-            className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-md text-white hover:opacity-90 transition-opacity"
+            className="inline-flex items-center gap-1 cursor-pointer text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-md text-white hover:opacity-90 transition-opacity"
             style={{ background: palette.text }}
             aria-label={`Open walkthrough: ${mechanism.walkthrough.title}`}
           >
