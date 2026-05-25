@@ -909,6 +909,15 @@ function CardShell({
 }
 
 function BeatCard({ beat }: { beat: BeatPlaceholder }) {
+  // Interactive: candidates are un-marked until the user clicks.
+  // First click locks the answer, reveals correctness + the reveal
+  // text. A small "Try again" link resets state if the user wants
+  // another pass.
+  const [pickedIndex, setPickedIndex] = useState<number | null>(null);
+  const locked = pickedIndex !== null;
+  const correctIndex = beat.answerIndex;
+  const wasCorrect = pickedIndex === correctIndex;
+
   return (
     <CardShell
       label={`Beat · ${beat.beatType}`}
@@ -931,56 +940,147 @@ function BeatCard({ beat }: { beat: BeatPlaceholder }) {
         }}
       >
         {beat.candidates.map((c, i) => {
-          const correct = i === beat.answerIndex;
+          const isPicked = i === pickedIndex;
+          const isCorrect = i === correctIndex;
+          // Visual state machine:
+          //   not locked, not hovered  → quiet card, clickable
+          //   not locked, hovered      → quiet card with accent border
+          //   locked, this is picked + correct  → strong accent fill
+          //   locked, this is picked + wrong    → muted red-ish accent
+          //   locked, this is the unpicked correct → outline accent, dim fill
+          //   locked, other            → very muted
+          let background = "var(--color-surface)";
+          let border = "1px solid var(--color-border-subtle)";
+          let color = "var(--color-text-secondary)";
+          let opacity = 1;
+          if (locked) {
+            if (isPicked && isCorrect) {
+              background = "rgba(212, 165, 116, 0.18)";
+              border = "1px solid var(--color-accent)";
+              color = "var(--color-accent-bright)";
+            } else if (isPicked && !isCorrect) {
+              background = "rgba(224, 82, 82, 0.10)";
+              border = "1px solid rgba(224, 82, 82, 0.5)";
+              color = "var(--color-diff-changed, #e05252)";
+            } else if (!isPicked && isCorrect) {
+              background = "transparent";
+              border = "1px dashed var(--color-accent)";
+              color = "var(--color-accent-dim)";
+            } else {
+              opacity = 0.55;
+            }
+          }
           return (
-            <div
+            <button
               key={i}
+              type="button"
+              disabled={locked}
+              onClick={() => setPickedIndex(i)}
               style={{
-                background: correct
-                  ? "var(--color-accent-overlay-bg)"
-                  : "var(--color-surface)",
-                border: correct
-                  ? "1px solid var(--color-accent-overlay-border)"
-                  : "1px solid var(--color-border-subtle)",
+                background,
+                border,
+                color,
+                opacity,
                 borderRadius: "3px",
-                padding: "8px 12px",
+                padding: "10px 12px",
                 fontFamily: "var(--font-mono)",
                 fontSize: "0.78rem",
-                color: correct
-                  ? "var(--color-accent-bright)"
-                  : "var(--color-text-secondary)",
                 textAlign: "center",
+                cursor: locked ? "default" : "pointer",
+                transition:
+                  "background-color 180ms ease, border-color 180ms ease, color 180ms ease, opacity 180ms ease",
+                font: "inherit",
+                fontStyle: "normal",
+              }}
+              onMouseEnter={(e) => {
+                if (!locked) {
+                  (e.currentTarget as HTMLButtonElement).style.borderColor =
+                    "var(--color-accent-overlay-border)";
+                  (e.currentTarget as HTMLButtonElement).style.color =
+                    "var(--color-text-primary)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!locked) {
+                  (e.currentTarget as HTMLButtonElement).style.borderColor =
+                    "var(--color-border-subtle)";
+                  (e.currentTarget as HTMLButtonElement).style.color =
+                    "var(--color-text-secondary)";
+                }
               }}
             >
               {c}
-            </div>
+            </button>
           );
         })}
       </div>
-      <p
-        style={{
-          marginTop: "14px",
-          fontSize: "0.85rem",
-          fontStyle: "italic",
-          color: "var(--color-text-secondary)",
-        }}
-      >
-        <strong
+      {locked && (
+        <div
           style={{
-            color: "var(--color-accent)",
-            fontStyle: "normal",
-            fontWeight: 600,
-            fontFamily: "var(--font-mono)",
-            fontSize: "0.72rem",
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            marginRight: "8px",
+            marginTop: "16px",
+            paddingTop: "14px",
+            borderTop: "1px solid var(--color-border-subtle)",
           }}
         >
-          Reveal
-        </strong>
-        {beat.reveal}
-      </p>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "8px",
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: "0.72rem",
+                fontWeight: 600,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: wasCorrect
+                  ? "var(--color-accent)"
+                  : "var(--color-diff-changed, #e05252)",
+              }}
+            >
+              {wasCorrect ? "Correct" : "Not quite"}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPickedIndex(null)}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--color-text-muted)",
+                cursor: "pointer",
+                fontFamily: "var(--font-mono)",
+                fontSize: "0.7rem",
+                letterSpacing: "0.06em",
+                padding: 0,
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.color =
+                  "var(--color-text-secondary)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.color =
+                  "var(--color-text-muted)";
+              }}
+            >
+              try again
+            </button>
+          </div>
+          <p
+            style={{
+              fontSize: "0.9rem",
+              lineHeight: 1.55,
+              color: "var(--color-text-primary)",
+              margin: 0,
+            }}
+          >
+            {beat.reveal}
+          </p>
+        </div>
+      )}
     </CardShell>
   );
 }
