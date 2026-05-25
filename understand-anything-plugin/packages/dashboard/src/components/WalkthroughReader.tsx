@@ -357,6 +357,7 @@ function ScenesWithStickyCode({
     () => walkthrough.scenes[0]?.id ?? null
   );
   const [hoverSceneId, setHoverSceneId] = useState<string | null>(null);
+  const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
   const activeSceneId = hoverSceneId ?? scrollSceneId;
   const activeExcerptKey = resolveExcerptForScene(activeSceneId);
 
@@ -434,6 +435,8 @@ function ScenesWithStickyCode({
             registerRef={observeScene}
             onHover={handleSceneHover}
             onUnhover={handleSceneUnhover}
+            hoveredSymbol={hoveredSymbol}
+            setHoveredSymbol={setHoveredSymbol}
           />
         ))}
       </div>
@@ -442,6 +445,7 @@ function ScenesWithStickyCode({
           excerpts={uniqueExcerpts}
           activeExcerptKey={activeExcerptKey}
           files={files}
+          hoveredSymbol={hoveredSymbol}
         />
       )}
     </div>
@@ -456,6 +460,8 @@ function SceneProse({
   registerRef,
   onHover,
   onUnhover,
+  hoveredSymbol,
+  setHoveredSymbol,
 }: {
   scene: WalkthroughScene;
   index: number;
@@ -464,6 +470,8 @@ function SceneProse({
   registerRef: (id: string, el: HTMLElement | null) => void;
   onHover: (id: string) => void;
   onUnhover: (id: string) => void;
+  hoveredSymbol: string | null;
+  setHoveredSymbol: (s: string | null) => void;
 }) {
   return (
     <article
@@ -509,7 +517,21 @@ function SceneProse({
         className="walkthrough-prose"
         style={{ lineHeight: 1.65, fontSize: "1.05rem" }}
       >
-        <ReactMarkdown>{scene.prose}</ReactMarkdown>
+        <ReactMarkdown
+          components={{
+            code: ({ children, ...props }) => (
+              <SymbolMark
+                hoveredSymbol={hoveredSymbol}
+                setHoveredSymbol={setHoveredSymbol}
+                {...props}
+              >
+                {children}
+              </SymbolMark>
+            ),
+          }}
+        >
+          {scene.prose}
+        </ReactMarkdown>
       </div>
       {scene.isClimax && pullQuote && (
         <blockquote
@@ -537,10 +559,12 @@ function StickyCodePane({
   excerpts,
   activeExcerptKey,
   files,
+  hoveredSymbol,
 }: {
   excerpts: { key: string; excerpt: NonNullable<WalkthroughScene["codeExcerpt"]> }[];
   activeExcerptKey: string | null;
   files: Record<string, FetchState>;
+  hoveredSymbol: string | null;
 }) {
   return (
     <aside
@@ -570,6 +594,7 @@ function StickyCodePane({
               excerpt={excerpt}
               fileState={fileState}
               isActive={isActive}
+              hoveredSymbol={hoveredSymbol}
             />
           );
         })}
@@ -582,10 +607,12 @@ function ExcerptStack({
   excerpt,
   fileState,
   isActive,
+  hoveredSymbol,
 }: {
   excerpt: NonNullable<WalkthroughScene["codeExcerpt"]>;
   fileState: FetchState | undefined;
   isActive: boolean;
+  hoveredSymbol: string | null;
 }) {
   return (
     <div
@@ -632,7 +659,11 @@ function ExcerptStack({
         </span>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        <CodeContent excerpt={excerpt} fileState={fileState} />
+        <CodeContent
+          excerpt={excerpt}
+          fileState={fileState}
+          hoveredSymbol={hoveredSymbol}
+        />
       </div>
     </div>
   );
@@ -641,9 +672,11 @@ function ExcerptStack({
 function CodeContent({
   excerpt,
   fileState,
+  hoveredSymbol,
 }: {
   excerpt: NonNullable<WalkthroughScene["codeExcerpt"]>;
   fileState: FetchState | undefined;
+  hoveredSymbol: string | null;
 }) {
   if (!fileState || fileState.status === "loading") {
     return (
@@ -691,7 +724,20 @@ function CodeContent({
         >
           {tokens.map((line, i) => {
             const absLine = startLineForDisplay + i;
-            const isHighlight = highlightLine !== undefined && absLine === highlightLine;
+            const isAuthoredHighlight =
+              highlightLine !== undefined && absLine === highlightLine;
+            // Cross-highlight: if the user is hovering an inline-code
+            // symbol in the prose, and this line of source contains
+            // that token (whole-word match, case-sensitive), the line
+            // gets a subtle highlight band.
+            const rawLineText = slice[i] ?? "";
+            const isSymbolHighlight =
+              hoveredSymbol !== null &&
+              hoveredSymbol.length > 0 &&
+              new RegExp(
+                `(^|[^A-Za-z0-9_])${escapeRegExp(hoveredSymbol)}([^A-Za-z0-9_]|$)`
+              ).test(rawLineText);
+            const isHighlight = isAuthoredHighlight || isSymbolHighlight;
             const lineProps = getLineProps({ line });
             return (
               <div
@@ -700,14 +746,17 @@ function CodeContent({
                 style={{
                   ...(lineProps.style as React.CSSProperties),
                   display: "flex",
-                  background: isHighlight
+                  background: isAuthoredHighlight
                     ? "rgba(122, 37, 25, 0.10)"
-                    : "transparent",
+                    : isSymbolHighlight
+                      ? "rgba(122, 37, 25, 0.07)"
+                      : "transparent",
                   borderLeft: isHighlight
                     ? "2px solid var(--accent, #7a2519)"
                     : "2px solid transparent",
                   paddingLeft: "8px",
                   marginLeft: "-8px",
+                  transition: "background-color 180ms ease",
                 }}
               >
                 <span
@@ -734,6 +783,60 @@ function CodeContent({
         </pre>
       )}
     </Highlight>
+  );
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Inline `code` in walkthrough prose. On hover, the symbol is published
+ * upward via setHoveredSymbol, which the StickyCodePane reads to
+ * highlight matching lines in the current code excerpt. Visually, the
+ * mark gets a subtle accent treatment whenever the symbol matches the
+ * currently-hovered one (anywhere — including the same span you're on).
+ */
+function SymbolMark({
+  children,
+  hoveredSymbol,
+  setHoveredSymbol,
+}: {
+  children: React.ReactNode;
+  hoveredSymbol: string | null;
+  setHoveredSymbol: (s: string | null) => void;
+}) {
+  const text =
+    typeof children === "string"
+      ? children
+      : Array.isArray(children)
+        ? children.filter((c) => typeof c === "string").join("")
+        : "";
+  const symbol = text.trim();
+  const isHovered = hoveredSymbol === symbol && symbol.length > 0;
+
+  return (
+    <code
+      onMouseEnter={() => symbol && setHoveredSymbol(symbol)}
+      onMouseLeave={() => setHoveredSymbol(null)}
+      style={{
+        fontFamily:
+          '"IBM Plex Mono", ui-monospace, Menlo, monospace',
+        fontSize: "0.92em",
+        background: isHovered
+          ? "rgba(122, 37, 25, 0.16)"
+          : "rgba(122, 37, 25, 0.06)",
+        color: isHovered
+          ? "var(--accent, #7a2519)"
+          : "var(--ink-soft, #3a2e23)",
+        padding: "1px 5px",
+        borderRadius: "2px",
+        cursor: "default",
+        transition: "background-color 160ms ease, color 160ms ease",
+      }}
+    >
+      {children}
+    </code>
   );
 }
 

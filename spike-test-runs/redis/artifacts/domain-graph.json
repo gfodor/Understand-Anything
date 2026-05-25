@@ -52,8 +52,8 @@
       "name": "Epoll signals readable fd",
       "filePath": "src/ae.c",
       "lineRange": [
-        400,
-        500
+        360,
+        420
       ],
       "summary": "The kernel epoll notification fires for the client's TCP fd; ae.c dispatches the registered read handler.",
       "tags": [
@@ -67,8 +67,8 @@
       "name": "Parse RESP protocol",
       "filePath": "src/networking.c",
       "lineRange": [
-        1500,
-        1600
+        3819,
+        3870
       ],
       "summary": "readQueryFromClient drains bytes from the socket into the client's query buffer and parses the RESP framing into argv.",
       "tags": [
@@ -83,8 +83,8 @@
       "name": "Lookup + validate command",
       "filePath": "src/server.c",
       "lineRange": [
-        3500,
-        3700
+        4391,
+        4440
       ],
       "summary": "processCommand finds the GET entry in the command table, validates arity and ACL, then calls call().",
       "tags": [
@@ -98,8 +98,8 @@
       "name": "Execute getCommand",
       "filePath": "src/server.c",
       "lineRange": [
-        3300,
-        3450
+        3928,
+        3980
       ],
       "summary": "call() invokes cmd->proc(c). For GET, that's getCommand in t_string.c; it calls lookupKeyRead on the keyspace dict.",
       "tags": [
@@ -113,8 +113,8 @@
       "name": "Format RESP bulk reply",
       "filePath": "src/networking.c",
       "lineRange": [
-        200,
-        300
+        1330,
+        1345
       ],
       "summary": "addReplyBulk formats the value into a RESP bulk-string frame and appends it to the client's output buffer.",
       "tags": [
@@ -129,8 +129,8 @@
       "name": "Flush output buffer",
       "filePath": "src/networking.c",
       "lineRange": [
-        1000,
-        1100
+        2879,
+        2920
       ],
       "summary": "When the kernel reports the client's fd writable, sendReplyToClient drains the buffer to the socket. The event loop continues.",
       "tags": [
@@ -221,9 +221,10 @@
           "codeExcerpt": {
             "path": "src/ae.c",
             "lineRange": [
-              400,
-              500
+              360,
+              410
             ],
+            "highlightLine": 360,
             "language": "c"
           }
         },
@@ -234,9 +235,10 @@
           "codeExcerpt": {
             "path": "src/networking.c",
             "lineRange": [
-              1500,
-              1600
+              3819,
+              3860
             ],
+            "highlightLine": 3819,
             "language": "c"
           }
         },
@@ -247,9 +249,10 @@
           "codeExcerpt": {
             "path": "src/server.c",
             "lineRange": [
-              3500,
-              3700
+              4391,
+              4430
             ],
+            "highlightLine": 4391,
             "language": "c"
           }
         },
@@ -260,16 +263,26 @@
           "codeExcerpt": {
             "path": "src/server.c",
             "lineRange": [
-              3300,
-              3450
+              3928,
+              3970
             ],
+            "highlightLine": 3928,
             "language": "c"
           }
         },
         {
           "id": "scene-5",
           "prose": "The value robj is passed to addReplyBulk, which formats the RESP bulk-string response ('$64\\r\\n' + value + '\\r\\n') and appends it to the client's output buffer — not the socket directly. networking.c's sendReplyToClient is registered as a writable handler on the client's fd; it gets called by the event loop when the kernel signals fd 12 is writable, and drains the output buffer to the socket.",
-          "anchorNodeId": "file:src/networking.c"
+          "anchorNodeId": "file:src/networking.c",
+          "codeExcerpt": {
+            "path": "src/networking.c",
+            "lineRange": [
+              1330,
+              1345
+            ],
+            "highlightLine": 1330,
+            "language": "c"
+          }
         },
         {
           "id": "scene-6",
