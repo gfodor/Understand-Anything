@@ -420,7 +420,8 @@ function ScenesWithStickyCode({
             : "1fr",
         columnGap: "40px",
         padding: "16px 40px 16px",
-        alignItems: "start",
+        // No alignItems — let the aside stretch to the grid row height,
+        // so the sticky element inside has somewhere to scroll within.
       }}
       onMouseLeave={() => setHoverSceneId(null)}
     >
@@ -566,19 +567,19 @@ function StickyCodePane({
   files: Record<string, FetchState>;
   hoveredSymbol: string | null;
 }) {
+  // Two-layer structure so position:sticky works inside a CSS grid:
+  // the <aside> is the grid item and stretches to row height (the
+  // prose column dictates row height; the aside fills it). The inner
+  // div is what actually sticks, positioned top:12px within the
+  // tall aside.
   return (
-    <aside
-      style={{
-        position: "sticky",
-        top: "12px",
-        height: "calc(100vh - 96px)",
-        minHeight: "32rem",
-      }}
-    >
+    <aside style={{ position: "relative", height: "100%" }}>
       <div
         style={{
-          position: "relative",
-          height: "100%",
+          position: "sticky",
+          top: "12px",
+          height: "calc(100vh - 96px)",
+          minHeight: "32rem",
           background: "var(--paper-recess, #ebe2cb)",
           border: "1px solid var(--rule, #d5c7a4)",
           borderRadius: "2px",
