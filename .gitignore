@@ -14,3 +14,5 @@ homepage/public/demo/
 .private/
 __pycache__/
 *.pyc
+spike-test-runs/redis/src/
+spike-test-runs/webspace-engine/src/

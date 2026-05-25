@@ -57,7 +57,7 @@
       "type": "function",
       "name": "_dictRehashStep",
       "filePath": "src/dict.c",
-      "lineRange": [220, 230],
+      "lineRange": [468, 472],
       "summary": "Moves one non-empty bucket from ht[0] to ht[1] and advances rehashidx. A single conditional call to this function near the top of every user-facing dict operation IS the entire amortization scheme. The line that carries the invariant is short — every user op does exactly one step of rehash work — and folding it into surrounding code would lose the reason it exists.",
       "tags": ["hash-table", "amortization", "non-obvious", "hot-path"],
       "complexity": "moderate"
@@ -67,7 +67,7 @@
       "type": "function",
       "name": "dictGenericDelete",
       "filePath": "src/dict.c",
-      "lineRange": [450, 510],
+      "lineRange": [622, 670],
       "summary": "Lookup-and-delete from a dict. Calls _dictRehashStep at the top; then checks both ht[0] and ht[1] (if rehashing) for the key; unlinks the matching entry and frees it.",
       "tags": ["hash-table"],
       "complexity": "moderate"

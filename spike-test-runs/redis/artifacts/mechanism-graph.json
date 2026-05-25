@@ -65,10 +65,11 @@
             "codeExcerpt": {
               "path": "src/dict.c",
               "lineRange": [
-                220,
-                230
+                466,
+                482
               ],
-              "language": "c"
+              "language": "c",
+              "highlightLine": 468
             },
             "embed": {
               "kind": "beat",
@@ -92,10 +93,11 @@
             "codeExcerpt": {
               "path": "src/dict.c",
               "lineRange": [
-                450,
-                510
+                622,
+                665
               ],
-              "language": "c"
+              "language": "c",
+              "highlightLine": 635
             },
             "isClimax": true
           },
