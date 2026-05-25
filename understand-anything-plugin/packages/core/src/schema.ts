@@ -418,6 +418,112 @@ export const ProjectMetaSchema = z.object({
   gitCommitHash: z.string(),
 });
 
+// =========================================================================
+// Mechanisms & Walkthroughs schemas
+// =========================================================================
+
+export const MechanismKindSchema = z.enum([
+  "algorithmic",
+  "architectural",
+  "architectural-elision",
+  "protocol",
+  "data-structure",
+]);
+
+export const ReviewPromptSchema = z.object({
+  id: z.string().optional(),
+  type: z.string(),
+  question: z.string(),
+  hint: z.string().optional(),
+}).passthrough();
+
+export const BeatPlaceholderSchema = z.object({
+  kind: z.literal("beat"),
+  beatType: z.enum(["trace-execution", "predict-outcome", "spot-beacon", "chunk-it"]),
+  question: z.string(),
+  candidates: z.array(z.string()),
+  answerIndex: z.number(),
+  reveal: z.string(),
+  windowSeconds: z.number().optional(),
+}).passthrough();
+
+export const FocalPlaceholderSchema = z.object({
+  kind: z.literal("focal"),
+  template: z.enum(["sequence-diagram", "state-diagram", "data-structure", "system-diagram", "metric-strip"]),
+  description: z.string(),
+  parameters: z.record(z.string(), z.string()).optional(),
+}).passthrough();
+
+export const SimPlaceholderSchema = z.object({
+  kind: z.literal("simulation"),
+  template: z.enum(["parameter-scrubber", "single-stepper", "fillable-container", "side-by-side-counterfactual"]),
+  description: z.string(),
+  parameters: z.record(z.string(), z.string()).optional(),
+}).passthrough();
+
+export const WalkthroughEmbedSchema = z.discriminatedUnion("kind", [
+  BeatPlaceholderSchema,
+  FocalPlaceholderSchema,
+  SimPlaceholderSchema,
+]);
+
+export const WalkthroughSceneSchema = z.object({
+  id: z.string(),
+  prose: z.string(),
+  anchorNodeId: z.string().optional(),
+  codeExcerpt: z.object({
+    path: z.string(),
+    lineRange: z.tuple([z.number(), z.number()]),
+    highlightLine: z.number().optional(),
+    language: z.string().optional(),
+  }).optional(),
+  embed: WalkthroughEmbedSchema.optional(),
+  isClimax: z.boolean().optional(),
+}).passthrough();
+
+export const WalkthroughSchema = z.object({
+  version: z.literal("1"),
+  attachedTo: z.object({
+    kind: z.enum(["flow", "mechanism"]),
+    id: z.string(),
+  }),
+  shape: z.enum(["process", "recognition"]),
+  title: z.string(),
+  subtitle: z.string(),
+  opening: z.object({
+    problem: z.string(),
+    tease: z.string(),
+    concreteInstance: z.string(),
+  }),
+  scenes: z.array(WalkthroughSceneSchema),
+  pullQuote: z.string().optional(),
+  coda: z.object({
+    summary: z.string(),
+    prompts: z.array(ReviewPromptSchema),
+  }),
+  generatedAt: z.string(),
+}).passthrough();
+
+export const MechanismSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: MechanismKindSchema,
+  premise: z.string(),
+  candidateRecognition: z.string(),
+  participantNodeIds: z.array(z.string()),
+  climacticNodeId: z.string(),
+  worthWalkthrough: z.boolean(),
+  walkthrough: WalkthroughSchema.optional(),
+  tags: z.array(z.string()).optional(),
+}).passthrough();
+
+export const MechanismGraphSchema = z.object({
+  version: z.string(),
+  project: ProjectMetaSchema,
+  mechanisms: z.array(MechanismSchema),
+  generatedAt: z.string(),
+}).passthrough();
+
 export const KnowledgeGraphSchema = z.object({
   version: z.string(),
   kind: z.enum(["codebase", "knowledge"]).optional(),
@@ -426,6 +532,7 @@ export const KnowledgeGraphSchema = z.object({
   edges: z.array(GraphEdgeSchema),
   layers: z.array(LayerSchema),
   tour: z.array(TourStepSchema),
+  mechanisms: z.array(MechanismSchema).optional(),
 });
 
 export interface GraphIssue {
@@ -650,13 +757,33 @@ export function validateGraph(data: unknown): ValidationResult {
     }
   }
 
-  const graph = {
+  // Optional: validate mechanisms if present (drop broken individually)
+  const validMechanisms: z.infer<typeof MechanismSchema>[] = [];
+  if (Array.isArray((fixed as Record<string, unknown>).mechanisms)) {
+    const raw = (fixed as Record<string, unknown>).mechanisms as unknown[];
+    for (let i = 0; i < raw.length; i++) {
+      const result = MechanismSchema.safeParse(raw[i]);
+      if (result.success) {
+        validMechanisms.push(result.data);
+      } else {
+        issues.push({
+          level: "dropped",
+          category: "invalid-mechanism",
+          message: `mechanisms[${i}]: ${result.error.issues[0]?.message ?? "validation failed"} — removed`,
+          path: `mechanisms[${i}]`,
+        });
+      }
+    }
+  }
+
+  const graph: z.infer<typeof KnowledgeGraphSchema> = {
     version: typeof fixed.version === "string" ? fixed.version : "1.0.0",
     project: projectResult.data,
     nodes: validNodes,
     edges: validEdges,
     layers: validLayers,
     tour: validTour,
+    ...(validMechanisms.length > 0 ? { mechanisms: validMechanisms } : {}),
   };
 
   return { success: true, data: graph, issues, errors: buildErrors(issues) };

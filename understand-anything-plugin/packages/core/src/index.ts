@@ -2,6 +2,16 @@ export * from "./types.js";
 export * from "./persistence/index.js";
 export {
   KnowledgeGraphSchema,
+  MechanismGraphSchema,
+  MechanismSchema,
+  MechanismKindSchema,
+  WalkthroughSchema,
+  WalkthroughSceneSchema,
+  WalkthroughEmbedSchema,
+  BeatPlaceholderSchema,
+  FocalPlaceholderSchema,
+  SimPlaceholderSchema,
+  ReviewPromptSchema,
   validateGraph,
   sanitizeGraph,
   autoFixGraph,
