@@ -1,0 +1,274 @@
+{
+  "version": "1",
+  "project": {
+    "name": "redis",
+    "languages": [
+      "C"
+    ],
+    "frameworks": [],
+    "description": "Redis is an in-memory data structure store used as database, cache, and message broker. Single-threaded event loop, custom dynamic strings, custom hash tables with incremental rehashing, multiple persistence strategies (RDB snapshots, AOF append-only files), replication, and clustering.",
+    "analyzedAt": "2026-05-25T00:00:00Z",
+    "gitCommitHash": "spike-fixture"
+  },
+  "generatedAt": "2026-05-25T08:00:00Z",
+  "mechanisms": [
+    {
+      "id": "mechanism:the-incremental-rehash",
+      "name": "The Incremental Rehash",
+      "kind": "algorithmic",
+      "premise": "Redis is single-threaded. A million-entry hash table doubled to two million doesn't need much: allocate the new table, walk the old, copy every entry, free the old. The trouble is that walking a million entries takes order of tens of milliseconds — and during those milliseconds the entire server is unresponsive because the dispatch loop is blocked. For a cache fronting hot user traffic, that is a multi-second p99 tail latency every time the dataset crosses a power-of-two boundary. Most key-value stores accept this cost or move it to a background thread, paying with lock complexity.",
+      "candidateRecognition": "Every user-facing dict operation does exactly one bucket of rehash work near the top of its body — a single line that amortizes the rehash across thousands of user operations, transforming a tens-of-milliseconds spike into an invisible smear of microseconds per request.",
+      "participantNodeIds": [
+        "file:src/dict.c",
+        "function:src/dict.c:_dictRehashStep",
+        "function:src/dict.c:dictGenericDelete"
+      ],
+      "climacticNodeId": "function:src/dict.c:_dictRehashStep",
+      "worthWalkthrough": true,
+      "tags": [
+        "hash-table",
+        "amortization",
+        "hot-path"
+      ],
+      "walkthrough": {
+        "version": "1",
+        "attachedTo": {
+          "kind": "mechanism",
+          "id": "mechanism:the-incremental-rehash"
+        },
+        "shape": "recognition",
+        "title": "The Incremental Rehash",
+        "subtitle": "Resizing a million-entry hash table takes tens of milliseconds — and Redis is single-threaded. Most databases accept the spike or move it to a background thread. Redis turned the spike into a smear.",
+        "opening": {
+          "problem": "Redis is single-threaded. One process, one event loop, one command at a time. The simplicity is the point — there are no locks anywhere in the hot path, no thread-context switches, no synchronization to debug. But it has a price. Any expensive operation done inline blocks every connected client for the duration. A million-entry hash table doubling to two million takes order of tens of milliseconds: allocate a new table, walk the old, copy every entry, free the old. Tens of milliseconds is a multi-second p99 tail every time the keyspace crosses a power-of-two boundary, and for a cache fronting hot user traffic the SLO does not survive that.",
+          "tease": "Most key-value stores either accept this cost — making rehash one of the documented latency hazards — or move it to a background thread, paying with lock complexity. Redis paid for neither. The rehash still happens; the latency spike does not.",
+          "concreteInstance": "We follow one specific dict: the global keyspace dict of a Redis instance currently holding 1024 entries, about to grow to 2048. The rehash is triggered at the 1024 → 2048 boundary; rehashidx becomes 0; over the next several thousand user-facing commands, buckets get migrated one per command until ht[0] is empty. A specific DEL command for the key 'session:7c4b3e' arriving mid-rehash sees a transient state we'll trace explicitly: rehashidx = 100, ht[0] has 924 entries left, ht[1] has 100, the key happens to live in ht[1]."
+        },
+        "scenes": [
+          {
+            "id": "scene-1",
+            "prose": "The naïve operation is the one to keep in mind as the baseline. A dict at load factor > 1 needs to grow. Allocate a new array twice as large; walk every existing entry; rehash its key; place it in the new array; free the old. Single pass, simple code, correct. In a million-entry dict this is roughly a million bucket walks plus a million memcpy's plus a million hash computations — call it 20 milliseconds on a modern CPU. For those 20 milliseconds the single-threaded server processes no commands. Every connected client pauses.\n\nMove the work to a background thread? Now reads have to coordinate with the rehasher: a key might be in the old table, or the new table, or mid-flight between them. The synchronization to handle that — atomic markers, retry loops, hazard pointers — is what Redis explicitly opted out of when it chose single-threading. The whole architectural simplification of Redis collapses if rehashing requires a second thread.",
+            "anchorNodeId": "file:src/dict.c",
+            "codeExcerpt": {
+              "path": "src/dict.c",
+              "lineRange": [
+                1,
+                50
+              ],
+              "language": "c"
+            }
+          },
+          {
+            "id": "scene-2",
+            "prose": "The Redis choice is the third option, the one that doesn't get used much: do the work in tiny pieces, attached to the work the server was already doing. When a dict crosses the load-factor threshold, Redis allocates the new table ht[1] but does not migrate any entries. It sets a flag: `rehashidx = 0`. The dict is now in 'rehashing' state. Every user-facing operation — every dictAdd, dictDelete, dictFind, dictReplace — checks that flag at the top of its body. If set, the operation calls _dictRehashStep, which moves exactly one non-empty bucket from ht[0] to ht[1] and advances rehashidx by 1.\n\nThat is the whole scheme. The rehash work that would have taken 20 milliseconds in a single batch is now spread across thousands of user-facing operations, each of which absorbs a few microseconds of rehash work. The total amount of work is unchanged. The distribution is completely different.",
+            "anchorNodeId": "function:src/dict.c:_dictRehashStep",
+            "codeExcerpt": {
+              "path": "src/dict.c",
+              "lineRange": [
+                220,
+                230
+              ],
+              "language": "c"
+            },
+            "embed": {
+              "kind": "beat",
+              "beatType": "predict-outcome",
+              "question": "During the rehash, a DEL for 'session:7c4b3e' arrives. The dict is at rehashidx=100. The key happens to live in ht[1]. What does dictGenericDelete do?",
+              "candidates": [
+                "Looks up only in ht[0], misses, returns 'not found'",
+                "Looks up in ht[0] then ht[1], finds it, deletes",
+                "Looks up only in ht[1], finds it, deletes",
+                "Triggers a full rehash to finish before responding"
+              ],
+              "answerIndex": 1,
+              "reveal": "During a rehash, every lookup checks BOTH tables. ht[0] has the old positions; ht[1] has the migrated ones. The lookup tries ht[0] first (cheap), and if rehashing it also tries ht[1]. This is the cost the readers pay during the rehash window — slightly slower lookups — and that cost is bounded because the rehash completes after O(N) user operations.",
+              "windowSeconds": 8
+            }
+          },
+          {
+            "id": "scene-3",
+            "prose": "The line at the top of every user-facing dict operation that does this work is one conditional call to _dictRehashStep. Look at dictGenericDelete. There is the hash computation, the rehashStep call, then the actual lookup walking ht[0] and (if rehashing) ht[1]. That single line of code — the `if (dictIsRehashing(d)) _dictRehashStep(d)` — is the entire amortization scheme.\n\nFolding that one line into the surrounding lookup logic would obscure why it exists. The line is structurally separate because it carries the architectural invariant: *every user-facing dict operation does exactly one step of rehash work*. The invariant is in one line because Redis is good. Every dict op in the codebase has this one line near the top; spotting it is one of the highest-leverage beacons in the codebase.",
+            "anchorNodeId": "function:src/dict.c:dictGenericDelete",
+            "codeExcerpt": {
+              "path": "src/dict.c",
+              "lineRange": [
+                450,
+                510
+              ],
+              "language": "c"
+            },
+            "isClimax": true
+          },
+          {
+            "id": "scene-4",
+            "prose": "The pattern — bound an operation's worst-case latency by amortizing it into other operations the system was already doing — appears across systems code. Garbage collectors do it: incremental mark-sweep does a tiny bit of marking work in every allocation rather than stopping the world. Database compaction does it: leveled compaction in LSM-tree stores chooses a few SSTables to merge per write rather than rewriting everything when a level fills. Window managers do it: the OS's draw-deferred mechanism schedules a small piece of paint work per vblank.\n\nThe common shape: an expensive whole-O(N) operation is broken into N tiny pieces of work, each attached to a user-facing operation, so the user pays for the rebalancing they triggered. Redis's incremental rehash is the cleanest small example of the pattern in any open-source codebase.",
+            "anchorNodeId": "function:src/dict.c:_dictRehashStep",
+            "embed": {
+              "kind": "beat",
+              "beatType": "spot-beacon",
+              "question": "Which of these other Redis subsystems also amortizes a potentially-spiky operation across user-facing calls?",
+              "candidates": [
+                "activeExpireCycle — adapts sweep rate to observed expiration rate",
+                "replicationFeedSlaves — buffers writes into a ring backlog",
+                "encoding promotion in object.c — silently swaps storage representation",
+                "ae.c epoll backend — chooses one of four kernel polling APIs"
+              ],
+              "answerIndex": 0,
+              "reveal": "activeExpireCycle is the closest cousin: rather than a synchronous scan over all expiring keys (which would block), it samples small random subsets per serverCron call and adapts the iteration budget to the observed hit rate. Different mechanism (sampling vs. work-per-op), same shape (transform a spike into a smear). The other three solve real problems but not this one.",
+              "windowSeconds": 10
+            }
+          },
+          {
+            "id": "scene-5",
+            "prose": "The rehash completes when the last non-empty bucket in ht[0] gets migrated; rehashidx returns to -1; the dict drops back to single-table operation; ht[0] is freed. By that point the time-domain spike that *would* have happened — that 20-millisecond block — has been spread across roughly N user-facing operations as a few microseconds per operation each. The total work is the same. The latency profile is unrecognizable.\n\nNothing in this scheme is sophisticated. There is no clever data structure, no exotic algorithm, no thread machinery. There is one line of code at the top of every dict operation. The cleverness is the *choice* — the architectural decision to pay for rebalancing where the user already was, instead of where the user wasn't.",
+            "anchorNodeId": "function:src/dict.c:_dictRehashStep"
+          }
+        ],
+        "pullQuote": "Every user-facing dict operation does exactly one bucket of rehash work near the top of its body. The architectural invariant is one line of code.",
+        "coda": {
+          "summary": "Redis's dict rehash is incremental: every user-facing dictAdd, dictDelete, dictFind calls _dictRehashStep at the top, which moves one bucket from ht[0] to ht[1]. The user pays the cost of growing the table in the operation that triggered the growth, distributed across thousands of subsequent ops. The single-threaded server never blocks for rehashing.",
+          "prompts": [
+            {
+              "type": "function-contract",
+              "question": "What does _dictRehashStep do in one invocation, and what state does it advance?"
+            },
+            {
+              "type": "counterfactual",
+              "question": "Suppose Redis chose to do a full rehash inside dictExpand instead of incrementally. With a 10-million-entry dict, what worst-case p99 latency would clients see during the growth?"
+            },
+            {
+              "type": "throughline-retention",
+              "question": "In our throughline, the dict was rehashing at rehashidx=100 and the key 'session:7c4b3e' lived in ht[1]. Would the lookup find it on the first table check (ht[0]) or the second (ht[1])?"
+            },
+            {
+              "type": "pattern-recognition",
+              "question": "Name the general pattern: a one-shot O(N) maintenance operation broken into N pieces, each attached to a user-facing call, so per-op latency stays bounded."
+            },
+            {
+              "type": "beacon",
+              "question": "What other subsystem in Redis amortizes a spiky operation across multiple invocations? (Hint: the periodic serverCron path.)"
+            },
+            {
+              "type": "counterfactual",
+              "question": "If the rehash is incremental and triggered by user ops, what happens if the server suddenly receives no user ops for several minutes after a rehash starts?"
+            }
+          ]
+        },
+        "generatedAt": "2026-05-25T08:30:00Z"
+      }
+    },
+    {
+      "id": "mechanism:the-pointer-as-string",
+      "name": "The Pointer As String",
+      "kind": "data-structure",
+      "premise": "C strings are null-terminated and unsafe; structured-string types like std::string in C++ are safer but their API breaks every C function that expects a char*. Redis needs both: O(1) length, binary safety, amortized-O(1) append — and it needs the strings to be passable straight to printf, sprintf, write(), strcmp() without translation. The two goals seem contradictory.",
+      "candidateRecognition": "The returned SDS pointer points to the chars, not to the header — the header lives at a negative offset behind the pointer — so an SDS string IS a char* but also has hidden length and capacity available via sdslen() and sdsavail() which read backwards from the pointer.",
+      "participantNodeIds": [
+        "file:src/sds.c",
+        "file:src/sds.h"
+      ],
+      "climacticNodeId": "file:src/sds.c",
+      "worthWalkthrough": true,
+      "tags": [
+        "string",
+        "data-structure",
+        "compat"
+      ]
+    },
+    {
+      "id": "mechanism:the-os-as-snapshot",
+      "name": "The OS As Snapshot",
+      "kind": "architectural",
+      "premise": "Snapshotting a running in-memory database is two problems: get a consistent point-in-time view of memory, and write it to disk without blocking the foreground server. The conventional approach is a long-running write transaction or a copy-on-write data structure with software bookkeeping. Either solution requires deep cooperation from every data type in the database; both add cycles to the hot path; both grow more fragile as the data model grows. Redis solved both problems by writing zero such code.",
+      "candidateRecognition": "rdbSaveBackground forks the process; the OS's copy-on-write fork() semantics give the child a consistent memory snapshot for free, and the parent keeps serving traffic while the kernel CoWs only the pages the parent modifies during the save.",
+      "participantNodeIds": [
+        "file:src/rdb.c",
+        "function:src/rdb.c:rdbSaveBackground",
+        "file:src/aof.c",
+        "function:src/aof.c:rewriteAppendOnlyFileBackground"
+      ],
+      "climacticNodeId": "function:src/rdb.c:rdbSaveBackground",
+      "worthWalkthrough": true,
+      "tags": [
+        "persistence",
+        "fork",
+        "cow",
+        "os"
+      ]
+    },
+    {
+      "id": "mechanism:the-encoding-promotion",
+      "name": "The Encoding Promotion",
+      "kind": "data-structure",
+      "premise": "Most real Redis workloads contain millions of small data structures — hashes with 3 keys, sorted sets with 12 members, lists of 4 elements. Each of those, naïvely, would carry the overhead of a real hash table or skip list — hundreds of bytes of pointers per data structure. With a million small hashes the overhead alone exceeds the data. But the same code paths must also serve a hash with 10 million entries, where the real hash table is the only viable representation.",
+      "candidateRecognition": "Every Redis object carries an encoding tag pointing to the cheapest representation that currently fits — listpack for small, hashtable for large — and the type implementation in t_hash.c (and t_zset.c, t_list.c, …) silently promotes from one to the other when a size threshold is crossed, so a hash that grew from 3 entries to 300 silently swapped storage strategies under your fingers.",
+      "participantNodeIds": [
+        "file:src/object.c",
+        "file:src/t_hash.c",
+        "file:src/listpack.c",
+        "file:src/dict.c"
+      ],
+      "climacticNodeId": "file:src/object.c",
+      "worthWalkthrough": true,
+      "tags": [
+        "object-model",
+        "encoding",
+        "memory"
+      ]
+    },
+    {
+      "id": "mechanism:the-resumable-stream",
+      "name": "The Resumable Stream",
+      "kind": "protocol",
+      "premise": "A Redis replica syncing with its master needs the whole dataset on first sync (an expensive operation involving fork() + RDB streaming) and then a continuous stream of every write command. A flaky network drops the connection every few minutes. Resyncing the whole dataset every time the connection blinks is unacceptable — the master would constantly be forking. The naïve solution is connection-level retry, but TCP can't recover after a disconnect.",
+      "candidateRecognition": "Every replication command is tagged with a monotonic master_repl_offset; the master keeps a bounded in-memory backlog ring buffer; a reconnecting replica asks for everything since offset N, and if N is still inside the backlog the master ships a delta instead of a full RDB.",
+      "participantNodeIds": [
+        "file:src/replication.c",
+        "function:src/replication.c:replicationFeedSlaves",
+        "file:src/rdb.c"
+      ],
+      "climacticNodeId": "function:src/replication.c:replicationFeedSlaves",
+      "worthWalkthrough": true,
+      "tags": [
+        "replication",
+        "partial-resync",
+        "ring-buffer"
+      ]
+    },
+    {
+      "id": "mechanism:the-adaptive-sweeper",
+      "name": "The Adaptive Sweeper",
+      "kind": "algorithmic",
+      "premise": "Redis keys can have TTLs; expired keys need to be deleted. Lazy expiration (check on read) is cheap but leaks memory if many expired keys are never read. Eager expiration (background scan) is correct but costs CPU whether or not the rate of expirations is high. A static scan rate is wrong both ways.",
+      "candidateRecognition": "activeExpireCycle samples a small random subset per call and adapts its iteration budget to the observed hit rate — under heavy expiration load it sweeps more aggressively; under light load it backs off — so the work scales with the actual rate of expiration, not with the size of the keyspace.",
+      "participantNodeIds": [
+        "file:src/expire.c",
+        "file:src/server.c"
+      ],
+      "climacticNodeId": "file:src/expire.c",
+      "worthWalkthrough": false,
+      "tags": [
+        "expire",
+        "adaptive"
+      ]
+    },
+    {
+      "id": "mechanism:the-platform-seam",
+      "name": "The Platform Seam",
+      "kind": "architectural",
+      "premise": "Redis must run on Linux (epoll), BSDs and macOS (kqueue), Solaris (evport), and as a fallback on any POSIX system (select). Each kernel API is different. Most cross-platform code wraps this difference in #ifdefs scattered through the codebase, eroding readability and turning every platform issue into a forensic exercise.",
+      "candidateRecognition": "ae.c declares a tiny six-function event-API surface (aeApiCreate, aeApiAddEvent, aeApiDelEvent, aeApiPoll, aeApiResize, aeApiName); each backend lives in exactly one file (ae_epoll.c, ae_kqueue.c, ae_evport.c, ae_select.c); a single #include at the top of ae.c chooses the right one at compile time — so the rest of the event loop reads as if there were no platforms.",
+      "participantNodeIds": [
+        "file:src/ae.c",
+        "file:src/ae_epoll.c"
+      ],
+      "climacticNodeId": "file:src/ae_epoll.c",
+      "worthWalkthrough": false,
+      "tags": [
+        "platform",
+        "abstraction",
+        "event-loop"
+      ]
+    }
+  ]
+}

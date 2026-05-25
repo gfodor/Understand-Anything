@@ -1,0 +1,289 @@
+{
+  "version": "1.0.0",
+  "kind": "codebase",
+  "project": {
+    "name": "redis",
+    "languages": ["C"],
+    "frameworks": [],
+    "description": "Redis is an in-memory data structure store used as database, cache, and message broker. Single-threaded event loop, custom dynamic strings, custom hash tables with incremental rehashing, multiple persistence strategies (RDB snapshots, AOF append-only files), replication, and clustering.",
+    "analyzedAt": "2026-05-25T00:00:00Z",
+    "gitCommitHash": "spike-fixture"
+  },
+  "nodes": [
+    {
+      "id": "document:README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "README.md",
+      "summary": "Project README. Calls out Redis's core design principles: single-threaded event loop for command dispatch, in-memory data structures with optional persistence, custom Simple Dynamic Strings (SDS), incremental rehashing in dict.c, RDB snapshots via fork() copy-on-write, AOF for append-only durability, master-replica replication, and Redis Cluster with hash-slot-based sharding. Notes the design philosophy of doing one thing per thread and amortizing expensive operations.",
+      "tags": ["overview"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/sds.c",
+      "type": "file",
+      "name": "sds.c",
+      "filePath": "src/sds.c",
+      "lineRange": [1, 1200],
+      "summary": "Simple Dynamic Strings — Redis's custom string type. The clever bit: an SDS string is a pointer to the *data*, not to a header struct. The struct header sits *behind* the returned pointer in memory, accessed by negative offsets. This means SDS strings are binary-safe, length-prefixed, but also pointer-compatible with C string functions like printf when they don't contain NULs. The header carries len + free (preallocated trailing space) so sdscat can grow amortized O(1).",
+      "tags": ["string", "data-structure", "hot-path"],
+      "complexity": "complex",
+      "languageNotes": "The trick: returned pointer is to the chars, not the header. Header is at -sizeof(struct) from the pointer."
+    },
+    {
+      "id": "file:src/sds.h",
+      "type": "file",
+      "name": "sds.h",
+      "filePath": "src/sds.h",
+      "lineRange": [1, 250],
+      "summary": "SDS header. Defines multiple struct layouts (sdshdr5, sdshdr8, sdshdr16, sdshdr32, sdshdr64) so very small strings carry only 1 byte of header overhead and very large strings can address 64-bit lengths. The size of the header is variable but stored in the type byte just before the chars, so sdslen() can dispatch on the type byte and know which header struct to read backwards.",
+      "tags": ["string", "data-structure"],
+      "complexity": "moderate",
+      "languageNotes": "Five header variants chosen by string length — bit-flagged in the type byte."
+    },
+    {
+      "id": "file:src/dict.c",
+      "type": "file",
+      "name": "dict.c",
+      "filePath": "src/dict.c",
+      "lineRange": [1, 1500],
+      "summary": "The hash table implementation Redis uses everywhere — for keyspaces, expires, pubsub channels. The signature design choice: incremental rehashing. When a dict grows past its load factor, instead of immediately rehashing all entries (which would block the single-threaded server for milliseconds), Redis allocates a second hash table (ht[1]) and migrates one bucket per user-facing operation. Every dictAdd, dictDelete, dictFind first calls _dictRehashStep, which moves one non-empty bucket from ht[0] to ht[1] and advances rehashidx. The dict is in 'rehashing' state if rehashidx >= 0; lookups must check both tables; user-facing latency stays bounded.",
+      "tags": ["hash-table", "amortization", "hot-path"],
+      "complexity": "complex",
+      "languageNotes": "Incremental rehash is the entire reason Redis can grow its keyspace without a latency spike."
+    },
+    {
+      "id": "function:src/dict.c:_dictRehashStep",
+      "type": "function",
+      "name": "_dictRehashStep",
+      "filePath": "src/dict.c",
+      "lineRange": [220, 230],
+      "summary": "Moves one non-empty bucket from ht[0] to ht[1] and advances rehashidx. A single conditional call to this function near the top of every user-facing dict operation IS the entire amortization scheme. The line that carries the invariant is short — every user op does exactly one step of rehash work — and folding it into surrounding code would lose the reason it exists.",
+      "tags": ["hash-table", "amortization", "non-obvious", "hot-path"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "function:src/dict.c:dictGenericDelete",
+      "type": "function",
+      "name": "dictGenericDelete",
+      "filePath": "src/dict.c",
+      "lineRange": [450, 510],
+      "summary": "Lookup-and-delete from a dict. Calls _dictRehashStep at the top; then checks both ht[0] and ht[1] (if rehashing) for the key; unlinks the matching entry and frees it.",
+      "tags": ["hash-table"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/ae.c",
+      "type": "file",
+      "name": "ae.c",
+      "filePath": "src/ae.c",
+      "lineRange": [1, 600],
+      "summary": "The event loop. Single-threaded reactor pattern: aeMain() loops calling aeProcessEvents(), which dispatches I/O events from epoll/kqueue/evport/select (chosen at compile time, via ae_epoll.c etc.) and time events from a linked-list timer queue. The whole command dispatch path runs here — recv, parse, execute, write back, repeat. No locks anywhere because there is no second thread.",
+      "tags": ["event-loop", "reactor"],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:src/ae_epoll.c",
+      "type": "file",
+      "name": "ae_epoll.c",
+      "filePath": "src/ae_epoll.c",
+      "lineRange": [1, 200],
+      "summary": "Linux epoll backend for the event loop. Implements the small ae_* API (aeApiCreate, aeApiAddEvent, aeApiPoll, etc.) over epoll_ctl + epoll_wait. The other ae_*.c files implement the same API over kqueue, evport, or select; the build selects exactly one at compile time. This is the platform-abstraction seam: ae.c only knows the small API; the kernel-specific code lives in one file per platform.",
+      "tags": ["event-loop", "epoll", "platform"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/server.c",
+      "type": "file",
+      "name": "server.c",
+      "filePath": "src/server.c",
+      "lineRange": [1, 8000],
+      "summary": "The main server. Hosts the command table (a static array of redisCommand entries — name, arity, flags, function pointer), the client connection accept handler, the periodic serverCron timer (called by the event loop ~10 times per second), and the central call() function that executes a command on a client. Most user-visible behavior bottlenecks through processCommand → call → cmd->proc(c).",
+      "tags": ["server", "dispatch"],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:src/server.c:processCommand",
+      "type": "function",
+      "name": "processCommand",
+      "filePath": "src/server.c",
+      "lineRange": [3500, 3700],
+      "summary": "Top of the command-dispatch path. Looks up the command in the command table by name, validates arity and flags, checks ACL/keyspace permissions, deals with cluster redirection, and finally calls call() which invokes the command's function pointer. This is where a Redis request becomes execution.",
+      "tags": ["dispatch", "request"],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:src/server.c:call",
+      "type": "function",
+      "name": "call",
+      "filePath": "src/server.c",
+      "lineRange": [3300, 3450],
+      "summary": "Executes the command function and handles command-level bookkeeping: stats, slowlog entry, latency monitor, AOF propagation, replication propagation. The actual command's function pointer is invoked here as cmd->proc(c).",
+      "tags": ["dispatch", "execution"],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:src/expire.c",
+      "type": "file",
+      "name": "expire.c",
+      "filePath": "src/expire.c",
+      "lineRange": [1, 700],
+      "summary": "Key expiration. Two paths: lazy expiration (every key access checks the TTL and deletes if expired), and active expiration via activeExpireCycle (called by serverCron). The active path samples a small random subset of expiring keys per iteration and deletes the expired ones; it adapts its iteration budget to recent expiration rates so under heavy expiration load it does more work and under light load it does less.",
+      "tags": ["expire", "adaptive"],
+      "complexity": "complex",
+      "languageNotes": "Adaptive sampling — the rate at which we hunt for expired keys depends on recent hit rate."
+    },
+    {
+      "id": "file:src/rdb.c",
+      "type": "file",
+      "name": "rdb.c",
+      "filePath": "src/rdb.c",
+      "lineRange": [1, 3000],
+      "summary": "RDB persistence. Snapshots the entire keyspace to disk in a binary format. The clever bit: rdbSaveBackground forks the server process; the child inherits a copy-on-write view of memory, walks the entire dataset writing to disk, then exits; the parent continues serving traffic. Modified pages get CoW'd by the OS so the parent's writes don't disturb the child's snapshot view. Memory cost is proportional to write rate during the save, not to dataset size.",
+      "tags": ["persistence", "fork", "cow", "hot-path"],
+      "complexity": "complex",
+      "languageNotes": "Cleverness: fork() for free copy-on-write. The OS does the snapshot."
+    },
+    {
+      "id": "function:src/rdb.c:rdbSaveBackground",
+      "type": "function",
+      "name": "rdbSaveBackground",
+      "filePath": "src/rdb.c",
+      "lineRange": [1280, 1360],
+      "summary": "fork()'s and lets the child write the RDB file. The whole-process fork is the snapshot; OS copy-on-write keeps the snapshot consistent while the parent continues serving traffic. After the fork, the child calls rdbSave to walk and serialize, then exits. The parent watches via a pipe + serverCron to detect completion.",
+      "tags": ["persistence", "fork", "non-obvious"],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:src/aof.c",
+      "type": "file",
+      "name": "aof.c",
+      "filePath": "src/aof.c",
+      "lineRange": [1, 3000],
+      "summary": "AOF persistence — append-only log of every write command. Two-stage write: feedAppendOnlyFile appends to an in-memory buffer; flushAppendOnlyFile flushes that buffer to disk on a configurable schedule (every command, every second, or never — fsync policy). The AOF rewrite path uses the same fork()+CoW trick as RDB: rewriteAppendOnlyFileBackground forks; the child writes a compacted AOF representing the current dataset; the parent buffers new commands and hands them to the child at the end.",
+      "tags": ["persistence", "log", "fork"],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:src/aof.c:rewriteAppendOnlyFileBackground",
+      "type": "function",
+      "name": "rewriteAppendOnlyFileBackground",
+      "filePath": "src/aof.c",
+      "lineRange": [1900, 1990],
+      "summary": "Forks to rewrite the AOF file. Same pattern as rdbSaveBackground — the child gets a CoW view of memory and writes the rewrite while the parent serves traffic. New commands the parent receives during the rewrite are buffered and shipped to the child at the end so the rewrite is consistent with the post-rewrite state.",
+      "tags": ["persistence", "fork"],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:src/replication.c",
+      "type": "file",
+      "name": "replication.c",
+      "filePath": "src/replication.c",
+      "lineRange": [1, 4500],
+      "summary": "Master-replica replication. New replicas sync with a full RDB snapshot (which the master generates via the same fork trick), then receive a stream of write commands. Replicas can do partial-resync: each command is tagged with a stream offset, replicas track their last-seen offset, and if a replica disconnects briefly it can resume from where it left off, getting the missing range from the master's in-memory backlog buffer. Avoids re-snapshotting in the common case.",
+      "tags": ["replication", "partial-resync"],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:src/replication.c:replicationFeedSlaves",
+      "type": "function",
+      "name": "replicationFeedSlaves",
+      "filePath": "src/replication.c",
+      "lineRange": [320, 400],
+      "summary": "Propagates a write command to all replicas. Writes the command to the master's in-memory backlog buffer and to each connected replica's output buffer. The backlog is a circular buffer keyed by master_repl_offset; replicas reconnecting can request a range starting from their last-seen offset and get the missing commands.",
+      "tags": ["replication"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/cluster.c",
+      "type": "file",
+      "name": "cluster.c",
+      "filePath": "src/cluster.c",
+      "lineRange": [1, 5000],
+      "summary": "Redis Cluster — sharded multi-node mode. Keyspace is partitioned into 16384 hash slots; each slot belongs to one node; client commands are routed by hashing the key to a slot. Nodes gossip with each other via a custom binary protocol; failovers are triggered by gossip-detected outages plus a Raft-like vote. Cluster is one of the larger subsystems but the central trick is the 16384-slot static partition that means slot assignment can be a static array lookup.",
+      "tags": ["cluster", "sharding"],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:src/networking.c",
+      "type": "file",
+      "name": "networking.c",
+      "filePath": "src/networking.c",
+      "lineRange": [1, 3500],
+      "summary": "Client connection handling — accept, read, parse RESP protocol, write reply. Hooks into the event loop in ae.c via readQueryFromClient and sendReplyToClient. Maintains output buffers per client; a slow client doesn't block the server because writes are buffered and flushed asynchronously.",
+      "tags": ["network", "client"],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:src/object.c",
+      "type": "file",
+      "name": "object.c",
+      "filePath": "src/object.c",
+      "lineRange": [1, 1500],
+      "summary": "robj — Redis Object. The polymorphic wrapper around all stored values. Type-tagged (string/list/set/zset/hash), encoding-tagged (raw vs embstr vs int vs listpack vs quicklist vs skiplist...), refcount-managed. The encoding tag lets Redis pick the cheapest representation per value: a tiny hash with 5 fields stays as a flat listpack (~50 bytes); the same hash with 200 fields gets promoted to a real hash table. The promotion is lazy.",
+      "tags": ["object-model", "encoding"],
+      "complexity": "complex",
+      "languageNotes": "Different encodings for small vs large values; promotion is the expensive case."
+    },
+    {
+      "id": "file:src/t_hash.c",
+      "type": "file",
+      "name": "t_hash.c",
+      "filePath": "src/t_hash.c",
+      "lineRange": [1, 1500],
+      "summary": "HASH type implementation. Two encodings: listpack (a compact flat encoding for small hashes) and a real hashtable (dict.c). Promotion threshold is configurable via hash-max-listpack-entries / hash-max-listpack-value. Most production Redis instances have many small hashes, and the listpack encoding is what makes that cheap.",
+      "tags": ["hash", "encoding"],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:src/listpack.c",
+      "type": "file",
+      "name": "listpack.c",
+      "filePath": "src/listpack.c",
+      "lineRange": [1, 1500],
+      "summary": "listpack — a compact, flat, self-encoding sequential container. Each element prepends a small header indicating its type and length; the whole structure is a single contiguous buffer. Lookups are O(n) but the constant is tiny; small data fits in cache. Used as the inner encoding for small hashes, sorted sets, and (with quicklist) lists.",
+      "tags": ["data-structure", "compact"],
+      "complexity": "complex"
+    }
+  ],
+  "edges": [
+    {"source": "function:src/server.c:processCommand", "target": "function:src/server.c:call", "type": "calls", "direction": "forward", "weight": 0.95},
+    {"source": "function:src/server.c:call", "target": "file:src/dict.c", "type": "calls", "direction": "forward", "weight": 0.7},
+    {"source": "function:src/dict.c:dictGenericDelete", "target": "function:src/dict.c:_dictRehashStep", "type": "calls", "direction": "forward", "weight": 0.95},
+    {"source": "file:src/dict.c", "target": "function:src/dict.c:_dictRehashStep", "type": "contains", "direction": "forward", "weight": 1.0},
+    {"source": "file:src/dict.c", "target": "function:src/dict.c:dictGenericDelete", "type": "contains", "direction": "forward", "weight": 1.0},
+    {"source": "file:src/server.c", "target": "function:src/server.c:processCommand", "type": "contains", "direction": "forward", "weight": 1.0},
+    {"source": "file:src/server.c", "target": "function:src/server.c:call", "type": "contains", "direction": "forward", "weight": 1.0},
+    {"source": "file:src/ae.c", "target": "file:src/ae_epoll.c", "type": "depends_on", "direction": "forward", "weight": 0.6},
+    {"source": "file:src/server.c", "target": "file:src/ae.c", "type": "calls", "direction": "forward", "weight": 0.9},
+    {"source": "file:src/networking.c", "target": "file:src/ae.c", "type": "calls", "direction": "forward", "weight": 0.9},
+    {"source": "file:src/networking.c", "target": "file:src/server.c", "type": "calls", "direction": "forward", "weight": 0.8},
+    {"source": "file:src/sds.c", "target": "file:src/sds.h", "type": "depends_on", "direction": "forward", "weight": 0.9},
+    {"source": "file:src/server.c", "target": "file:src/sds.c", "type": "depends_on", "direction": "forward", "weight": 0.8},
+    {"source": "file:src/rdb.c", "target": "function:src/rdb.c:rdbSaveBackground", "type": "contains", "direction": "forward", "weight": 1.0},
+    {"source": "file:src/aof.c", "target": "function:src/aof.c:rewriteAppendOnlyFileBackground", "type": "contains", "direction": "forward", "weight": 1.0},
+    {"source": "file:src/replication.c", "target": "file:src/rdb.c", "type": "calls", "direction": "forward", "weight": 0.8},
+    {"source": "file:src/replication.c", "target": "function:src/replication.c:replicationFeedSlaves", "type": "contains", "direction": "forward", "weight": 1.0},
+    {"source": "function:src/server.c:call", "target": "file:src/aof.c", "type": "triggers", "direction": "forward", "weight": 0.5},
+    {"source": "function:src/server.c:call", "target": "function:src/replication.c:replicationFeedSlaves", "type": "calls", "direction": "forward", "weight": 0.7},
+    {"source": "file:src/server.c", "target": "file:src/expire.c", "type": "calls", "direction": "forward", "weight": 0.6},
+    {"source": "file:src/t_hash.c", "target": "file:src/listpack.c", "type": "depends_on", "direction": "forward", "weight": 0.8},
+    {"source": "file:src/t_hash.c", "target": "file:src/dict.c", "type": "depends_on", "direction": "forward", "weight": 0.7},
+    {"source": "file:src/t_hash.c", "target": "file:src/object.c", "type": "depends_on", "direction": "forward", "weight": 0.8},
+    {"source": "file:src/cluster.c", "target": "file:src/server.c", "type": "depends_on", "direction": "forward", "weight": 0.5},
+    {"source": "document:README.md", "target": "file:src/sds.c", "type": "documents", "direction": "forward", "weight": 0.4},
+    {"source": "document:README.md", "target": "file:src/dict.c", "type": "documents", "direction": "forward", "weight": 0.5},
+    {"source": "document:README.md", "target": "file:src/ae.c", "type": "documents", "direction": "forward", "weight": 0.5},
+    {"source": "document:README.md", "target": "file:src/rdb.c", "type": "documents", "direction": "forward", "weight": 0.4},
+    {"source": "document:README.md", "target": "file:src/aof.c", "type": "documents", "direction": "forward", "weight": 0.4},
+    {"source": "document:README.md", "target": "file:src/replication.c", "type": "documents", "direction": "forward", "weight": 0.3},
+    {"source": "document:README.md", "target": "file:src/cluster.c", "type": "documents", "direction": "forward", "weight": 0.3}
+  ],
+  "layers": [
+    {"id": "layer:core-data", "name": "Core data structures", "description": "SDS, dict, listpack, the robj wrapper.", "nodeIds": ["file:src/sds.c", "file:src/sds.h", "file:src/dict.c", "function:src/dict.c:_dictRehashStep", "function:src/dict.c:dictGenericDelete", "file:src/object.c", "file:src/listpack.c", "file:src/t_hash.c"]},
+    {"id": "layer:server", "name": "Server & dispatch", "description": "Event loop, command dispatch, networking.", "nodeIds": ["file:src/server.c", "function:src/server.c:processCommand", "function:src/server.c:call", "file:src/ae.c", "file:src/ae_epoll.c", "file:src/networking.c"]},
+    {"id": "layer:persistence", "name": "Persistence", "description": "RDB snapshots, AOF append-only log, expiration.", "nodeIds": ["file:src/rdb.c", "function:src/rdb.c:rdbSaveBackground", "file:src/aof.c", "function:src/aof.c:rewriteAppendOnlyFileBackground", "file:src/expire.c"]},
+    {"id": "layer:distributed", "name": "Replication & Cluster", "description": "Master-replica replication, cluster sharding.", "nodeIds": ["file:src/replication.c", "function:src/replication.c:replicationFeedSlaves", "file:src/cluster.c"]}
+  ],
+  "tour": []
+}
