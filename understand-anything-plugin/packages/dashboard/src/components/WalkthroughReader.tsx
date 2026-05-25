@@ -226,22 +226,7 @@ function Opening({ walkthrough }: { walkthrough: Walkthrough }) {
           textWrap: "pretty" as React.CSSProperties["textWrap"],
         }}
       >
-        <span
-          aria-hidden="true"
-          style={{
-            float: "left",
-            fontFamily: "var(--font-heading)",
-            fontWeight: 400,
-            fontSize: "4.6em",
-            lineHeight: 0.88,
-            padding: "0.06em 0.16em 0 0",
-            color: "var(--color-accent)",
-            letterSpacing: "-0.02em",
-          }}
-        >
-          {walkthrough.opening.problem.charAt(0)}
-        </span>
-        {walkthrough.opening.problem.slice(1)}
+        {walkthrough.opening.problem}
       </p>
       <p style={{ margin: "0 0 1.2em", color: "var(--color-text-primary)" }}>
         {walkthrough.opening.tease}
