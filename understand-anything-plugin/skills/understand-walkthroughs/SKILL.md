@@ -121,28 +121,79 @@ If the resulting target list is empty, print a summary explaining why and exit c
 
 ### Phase 3: Sequential walkthrough generation
 
-For each target in `walkthrough-targets.json`, run the same workflow as `/understand-walkthrough <id>`:
+**This phase processes every target in `walkthrough-targets.json`, one at a time. You MUST NOT exit this phase until either (a) every remaining target has been processed, or (b) you have hit a hard context-budget limit that forces a stop. Generating one walkthrough and concluding is INCORRECT behavior — it is a batch skill.**
 
-1. Look up the artifact record (Flow or Mechanism)
-2. Resolve participant nodes from `knowledge-graph.json`
-3. Pull source excerpts for the 4-6 most important nodes
-4. Write `intermediate/walkthrough-context.json`
-5. Dispatch `walkthrough-author` agent with shape directive (`recognition` for mechanisms, `process` for flows)
-6. Validate result with `WalkthroughSchema`
-7. Attach into `mechanism-graph.json` or `domain-graph.json` walkthroughs[]
-8. Clean up the per-iteration intermediate files
+#### Initialize the resume tracker
 
-The orchestration here mirrors `understand-walkthrough/SKILL.md` Phases 3-5. Either re-execute those phases inline per target, or invoke the singular skill internally per target.
+Before the loop, ensure `intermediate/walkthroughs-done.json` exists (create as `[]` if not):
 
-**Sequential, not parallel.** Each iteration is one full LLM dispatch and parallelism would (a) starve the parent agent's context budget, (b) risk dispatching against the same intermediate file paths. Run them in order.
-
-After each successful save, print a progress line:
-
-```
-[3/7] ✓ mechanism:the-worklet-as-string → "The Worklet as String" (recognition, 5 scenes)
+```bash
+DONE_FILE="$PROJECT_ROOT/.understand-anything/intermediate/walkthroughs-done.json"
+if [ ! -f "$DONE_FILE" ]; then echo "[]" > "$DONE_FILE"; fi
 ```
 
-**Failure handling.** If any single target fails (agent dispatch errors, validation fails, etc.), record the failure to the summary and continue with the next target. Do not abort the whole batch on a single failure; partial coverage is better than none.
+This file lets you (or a re-invocation of this skill) resume mid-batch. Each successful attachment appends the artifact id to this list.
+
+#### Compute the remaining set
+
+Read `walkthrough-targets.json` and `walkthroughs-done.json`. The **remaining** set is targets whose id is NOT in done. Count it; you will iterate that many times.
+
+```bash
+node --input-type=module -e "$(cat <<'EOF'
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+const projectRoot = process.argv[2];
+const targets = JSON.parse(readFileSync(join(projectRoot, '.understand-anything', 'intermediate', 'walkthrough-targets.json'), 'utf-8')).targets;
+const done = JSON.parse(readFileSync(join(projectRoot, '.understand-anything', 'intermediate', 'walkthroughs-done.json'), 'utf-8'));
+const doneSet = new Set(done);
+const remaining = targets.filter(t => !doneSet.has(t.id));
+console.log('TOTAL_TARGETS=' + targets.length);
+console.log('ALREADY_DONE=' + done.length);
+console.log('REMAINING=' + remaining.length);
+remaining.forEach((t, i) => console.log('TARGET_' + i + '=' + JSON.stringify(t)));
+EOF
+)" "$PROJECT_ROOT"
+```
+
+Use that output to drive the iteration. **Iterate over the remaining set in order. For each iteration:**
+
+#### Per-target steps (repeat for every remaining target)
+
+For target `i` (zero-indexed) of `N` remaining:
+
+1. **Look up the artifact** — open `mechanism-graph.json` (if `kind=mechanism`) or `domain-graph.json` (if `kind=flow`) and locate the record by id.
+
+2. **Resolve participant nodes** — for each id in `participantNodeIds`, look it up in `knowledge-graph.json` and collect `{name, filePath, lineRange, summary, languageNotes, tags}`.
+
+3. **Pull source excerpts** — for the 4-6 most-important nodes (climacticNodeId + high-fan-in + summary-rich), read the file at `filePath` and slice to `lineRange`. Cap each excerpt at ~40 lines.
+
+4. **Write the context file** — `intermediate/walkthrough-context.json` (overwrites the previous iteration's; that's intentional, this is single-target state).
+
+5. **Dispatch the `walkthrough-author` subagent** with the context. Shape directive: `recognition` for mechanisms, `process` for flows. Wait for it to write `intermediate/walkthrough.json`.
+
+6. **Validate** the agent's output against `WalkthroughSchema` from `@understand-anything/core`. If invalid, RECORD the failure (append to a `walkthroughs-failed.json` with target id + error message) and CONTINUE to the next iteration — do not abort the batch.
+
+7. **Attach** the validated walkthrough back into the host artifact:
+   - Mechanisms: set `walkthrough` field on the matching mechanism in `mechanism-graph.json`.
+   - Flows: upsert into `domain-graph.json`'s top-level `walkthroughs[]` array, keyed by `attachedTo.id`.
+
+8. **Mark done**: append the target's id to `walkthroughs-done.json`.
+
+9. **Print progress**:
+
+   ```
+   [3/7] ✓ mechanism:the-worklet-as-string → "The Worklet as String" (recognition, 5 scenes)
+   ```
+
+10. **Continue to the next iteration immediately.** Do not announce "done with phase 3" until `remaining.length` iterations have completed. After processing target `i`, the loop should advance to target `i+1`.
+
+#### Why resume matters
+
+If your context budget gets tight, save state by leaving the intermediate files in place and inform the user: *"Generated N of M walkthroughs. Re-run `/understand-walkthroughs` to resume from target N+1."* On re-invocation, Phase 3's "compute remaining" step will skip everything already in `walkthroughs-done.json` and pick up from where you left off. This is the spike's answer to long batches: don't dispatch in parallel (context starvation), don't try to do all-or-nothing (one failure shouldn't waste the whole batch), just record progress as you go.
+
+**Sequential, not parallel.** Each iteration is one full LLM dispatch. Parallelism would starve the parent agent's context and collide on intermediate file paths.
+
+**Failure handling.** Validation failures or agent errors append to `walkthroughs-failed.json` and continue to the next target. Partial coverage is better than none. The user can re-run `/understand-walkthrough <id>` on any failures.
 
 ### Phase 4: Report
 

@@ -66,6 +66,33 @@ export function WalkthroughReader() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, close]);
 
+  // Browser/host Back button closes the walkthrough.
+  //
+  // On open, push a synthetic history entry so a Back press doesn't
+  // navigate away from the dashboard — it instead pops our entry and
+  // we treat that as a close. On close from any other path (X, Escape,
+  // backdrop click), we call history.back() ourselves to remove the
+  // entry from the stack so the user doesn't have a leftover "ghost"
+  // state to back through.
+  useEffect(() => {
+    if (!open) return;
+    let closedByPopState = false;
+    window.history.pushState({ walkthroughOpen: true }, "");
+    const onPopState = () => {
+      closedByPopState = true;
+      close();
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      if (!closedByPopState) {
+        // Close came from inside the app (Escape / X / backdrop).
+        // Pop our pushed entry so the back stack stays clean.
+        window.history.back();
+      }
+    };
+  }, [open, close]);
+
   useEffect(() => {
     if (open && scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = 0;
