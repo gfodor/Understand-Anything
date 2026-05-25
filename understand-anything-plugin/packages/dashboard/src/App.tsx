@@ -33,6 +33,9 @@ const KeyboardShortcutsHelp = lazy(
   () => import("./components/KeyboardShortcutsHelp"),
 );
 const OnboardingOverlay = lazy(() => import("./components/OnboardingOverlay"));
+const WalkthroughReader = lazy(() =>
+  import("./components/WalkthroughReader").then((m) => ({ default: m.WalkthroughReader })),
+);
 
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 const SESSION_TOKEN_KEY = "understand-anything-token";
@@ -108,6 +111,7 @@ function App() {
 function Dashboard({ accessToken }: { accessToken: string }) {
   const setGraph = useDashboardStore((s) => s.setGraph);
   const setDomainGraph = useDashboardStore((s) => s.setDomainGraph);
+  const setMechanismGraph = useDashboardStore((s) => s.setMechanismGraph);
   const setDiffOverlay = useDashboardStore((s) => s.setDiffOverlay);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [graphIssues, setGraphIssues] = useState<GraphIssue[]>([]);
@@ -204,6 +208,25 @@ function Dashboard({ accessToken }: { accessToken: string }) {
       .catch(() => {});
   }, [setDomainGraph]);
 
+  // Mechanism graph — sibling artifact, separate schema. Fetched independently
+  // so its absence does not block structural/domain rendering.
+  useEffect(() => {
+    fetch(dataUrl("mechanism-graph.json", accessToken))
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then((data: unknown) => {
+        if (!data || typeof data !== "object") return;
+        const d = data as Record<string, unknown>;
+        if (!Array.isArray(d.mechanisms)) return;
+        // Minimal client-side validation. The skill validates with the
+        // full Zod schema before writing, so this is a defense-in-depth pass.
+        setMechanismGraph(d as never);
+      })
+      .catch(() => {});
+  }, [setMechanismGraph]);
+
   return (
     <I18nProvider language={outputLanguage ?? "en"}>
       <ThemeProvider metaTheme={metaTheme}>
@@ -236,6 +259,7 @@ function DashboardContent({
   const collapseCodeViewer = useDashboardStore((s) => s.collapseCodeViewer);
   const pathFinderOpen = useDashboardStore((s) => s.pathFinderOpen);
   const togglePathFinder = useDashboardStore((s) => s.togglePathFinder);
+  const walkthroughOpen = useDashboardStore((s) => s.walkthroughOpen);
   const nodeTypeFilters = useDashboardStore((s) => s.nodeTypeFilters);
   const toggleNodeTypeFilter = useDashboardStore((s) => s.toggleNodeTypeFilter);
   const detailLevel = useDashboardStore((s) => s.detailLevel);
@@ -704,6 +728,14 @@ function DashboardContent({
       {showOnboarding && (
         <Suspense fallback={null}>
           <OnboardingOverlay onDismiss={dismissOnboarding} />
+        </Suspense>
+      )}
+
+      {/* Walkthrough reader — depth-first deep-read for a Flow or Mechanism.
+          Mounted always but renders nothing until activated via store. */}
+      {walkthroughOpen && (
+        <Suspense fallback={null}>
+          <WalkthroughReader />
         </Suspense>
       )}
     </div>

@@ -6,6 +6,9 @@ import type {
   GraphNode,
   KnowledgeGraph,
   TourStep,
+  Mechanism,
+  MechanismGraph,
+  Walkthrough,
 } from "@understand-anything/core/types";
 import type { ReactFlowInstance } from "@xyflow/react";
 
@@ -199,6 +202,16 @@ interface DashboardStore {
   setIsKnowledgeGraph: (value: boolean) => void;
   navigateToDomain: (domainId: string) => void;
   clearActiveDomain: () => void;
+
+  // Mechanisms (peer to domain graph; sibling artifact mechanism-graph.json)
+  mechanismGraph: MechanismGraph | null;
+  setMechanismGraph: (graph: MechanismGraph | null) => void;
+
+  // Walkthrough reader (modal — episodic, not navigational)
+  walkthroughOpen: boolean;
+  activeWalkthrough: Walkthrough | null;
+  openWalkthrough: (walkthrough: Walkthrough) => void;
+  closeWalkthrough: () => void;
 
   // Container expand/collapse + lazy layout caches
   expandedContainers: Set<string>;
@@ -677,6 +690,15 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
   setDomainGraph: (graph) => {
     set({ domainGraph: graph });
   },
+
+  mechanismGraph: null,
+  setMechanismGraph: (graph) => set({ mechanismGraph: graph }),
+
+  walkthroughOpen: false,
+  activeWalkthrough: null,
+  openWalkthrough: (walkthrough) =>
+    set({ walkthroughOpen: true, activeWalkthrough: walkthrough }),
+  closeWalkthrough: () => set({ walkthroughOpen: false, activeWalkthrough: null }),
 
   setIsKnowledgeGraph: (value) => {
     set({ isKnowledgeGraph: value });
