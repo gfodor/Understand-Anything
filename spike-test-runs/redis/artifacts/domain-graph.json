@@ -1,0 +1,304 @@
+{
+  "version": "1.0.0",
+  "kind": "codebase",
+  "project": {
+    "name": "redis",
+    "languages": [
+      "C"
+    ],
+    "frameworks": [],
+    "description": "Redis is an in-memory data structure store. The domain view here is illustrative — built by hand for the spike rather than produced by /understand-domain.",
+    "analyzedAt": "2026-05-25T00:00:00Z",
+    "gitCommitHash": "spike-fixture"
+  },
+  "nodes": [
+    {
+      "id": "domain:command-execution",
+      "type": "domain",
+      "name": "Command Execution",
+      "summary": "How a Redis client request becomes a server response — from the kernel epoll event through command dispatch to the bytes flushed back to the socket.",
+      "tags": [
+        "dispatch",
+        "request"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entities": [
+          "Client",
+          "Command",
+          "Reply",
+          "Connection"
+        ]
+      }
+    },
+    {
+      "id": "flow:execute-get-command",
+      "type": "flow",
+      "name": "Execute GET command",
+      "summary": "A client sends `GET <key>`; the server returns the bytes stored at that key. Five files, six function calls, no locks.",
+      "tags": [
+        "read",
+        "fast"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "RESP frame on TCP fd",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "step:epoll-readable",
+      "type": "step",
+      "name": "Epoll signals readable fd",
+      "filePath": "src/ae.c",
+      "lineRange": [
+        400,
+        500
+      ],
+      "summary": "The kernel epoll notification fires for the client's TCP fd; ae.c dispatches the registered read handler.",
+      "tags": [
+        "epoll"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "step:parse-resp",
+      "type": "step",
+      "name": "Parse RESP protocol",
+      "filePath": "src/networking.c",
+      "lineRange": [
+        1500,
+        1600
+      ],
+      "summary": "readQueryFromClient drains bytes from the socket into the client's query buffer and parses the RESP framing into argv.",
+      "tags": [
+        "network",
+        "parse"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "step:process-command",
+      "type": "step",
+      "name": "Lookup + validate command",
+      "filePath": "src/server.c",
+      "lineRange": [
+        3500,
+        3700
+      ],
+      "summary": "processCommand finds the GET entry in the command table, validates arity and ACL, then calls call().",
+      "tags": [
+        "dispatch"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "step:call-getCommand",
+      "type": "step",
+      "name": "Execute getCommand",
+      "filePath": "src/server.c",
+      "lineRange": [
+        3300,
+        3450
+      ],
+      "summary": "call() invokes cmd->proc(c). For GET, that's getCommand in t_string.c; it calls lookupKeyRead on the keyspace dict.",
+      "tags": [
+        "execution"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "step:format-reply",
+      "type": "step",
+      "name": "Format RESP bulk reply",
+      "filePath": "src/networking.c",
+      "lineRange": [
+        200,
+        300
+      ],
+      "summary": "addReplyBulk formats the value into a RESP bulk-string frame and appends it to the client's output buffer.",
+      "tags": [
+        "network",
+        "reply"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "step:send-reply",
+      "type": "step",
+      "name": "Flush output buffer",
+      "filePath": "src/networking.c",
+      "lineRange": [
+        1000,
+        1100
+      ],
+      "summary": "When the kernel reports the client's fd writable, sendReplyToClient drains the buffer to the socket. The event loop continues.",
+      "tags": [
+        "network"
+      ],
+      "complexity": "simple"
+    }
+  ],
+  "edges": [
+    {
+      "source": "domain:command-execution",
+      "target": "flow:execute-get-command",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "flow:execute-get-command",
+      "target": "step:epoll-readable",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1,
+      "description": "1"
+    },
+    {
+      "source": "flow:execute-get-command",
+      "target": "step:parse-resp",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1,
+      "description": "2"
+    },
+    {
+      "source": "flow:execute-get-command",
+      "target": "step:process-command",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1,
+      "description": "3"
+    },
+    {
+      "source": "flow:execute-get-command",
+      "target": "step:call-getCommand",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1,
+      "description": "4"
+    },
+    {
+      "source": "flow:execute-get-command",
+      "target": "step:format-reply",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1,
+      "description": "5"
+    },
+    {
+      "source": "flow:execute-get-command",
+      "target": "step:send-reply",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1,
+      "description": "6"
+    }
+  ],
+  "layers": [],
+  "tour": [],
+  "walkthroughs": [
+    {
+      "version": "1",
+      "attachedTo": {
+        "kind": "flow",
+        "id": "flow:execute-get-command"
+      },
+      "shape": "process",
+      "title": "A GET goes through Redis",
+      "subtitle": "From a TCP packet arriving on port 6379 to the response bytes going back out — five files, six function calls, no locks.",
+      "opening": {
+        "problem": "Redis is a key-value store. A client sends 'GET foo'; the server returns the bytes stored at 'foo'. Trivially simple at the user surface. Inside the server, the same path handles authentication, TLS, multi-database selection, keyspace notification, command propagation to replicas, expiration checking, encoding-specific decoding, output buffering for slow clients, and integration with the AOF log. Understanding what fires when is the difference between reading the code and reading the system.",
+        "tease": "The path passes through five distinct files, doing a handful of things at each boundary. Following one GET end-to-end gives the rest of the codebase a frame.",
+        "concreteInstance": "We follow one specific GET. A client at 198.51.100.4 sends 'GET session:7c4b3e' over its already-established TCP connection on port 6379. The key exists in the keyspace; its value is a 64-byte SDS string. The response is the value, followed by CRLF, in RESP bulk-string format."
+      },
+      "scenes": [
+        {
+          "id": "scene-1",
+          "prose": "The kernel signals the event loop via epoll that fd 12 (the client's socket) is readable. ae.c's aeApiPoll returns this fd as a fired event; aeProcessEvents looks up the handler that was registered for read events on this fd — readQueryFromClient in networking.c — and calls it.",
+          "anchorNodeId": "file:src/ae.c",
+          "codeExcerpt": {
+            "path": "src/ae.c",
+            "lineRange": [
+              400,
+              500
+            ],
+            "language": "c"
+          }
+        },
+        {
+          "id": "scene-2",
+          "prose": "readQueryFromClient reads available bytes from the socket into the client struct's query buffer. Parses the RESP protocol — '*2\\r\\n$3\\r\\nGET\\r\\n$15\\r\\nsession:7c4b3e\\r\\n' — into argv = ['GET', 'session:7c4b3e']. If the parse is complete (we have a full command), it calls processInputBuffer which eventually invokes processCommand.",
+          "anchorNodeId": "file:src/networking.c",
+          "codeExcerpt": {
+            "path": "src/networking.c",
+            "lineRange": [
+              1500,
+              1600
+            ],
+            "language": "c"
+          }
+        },
+        {
+          "id": "scene-3",
+          "prose": "processCommand looks up argv[0] = 'GET' in the static command table and finds redisCommand{name='GET', proc=getCommand, arity=2, flags=READONLY|FAST}. It validates: arity matches (2 args including the command name), the client has READ permission on this keyspace, no cluster redirect is needed. Then it calls call(c, flags) which is where the actual work happens.",
+          "anchorNodeId": "function:src/server.c:processCommand",
+          "codeExcerpt": {
+            "path": "src/server.c",
+            "lineRange": [
+              3500,
+              3700
+            ],
+            "language": "c"
+          }
+        },
+        {
+          "id": "scene-4",
+          "prose": "call invokes cmd->proc(c), which for GET means getCommand in t_string.c. That function calls lookupKeyRead on the current db's main dict, which is where the dict.c machinery from the Incremental Rehash mechanism comes in: the lookup checks ht[0] and, if the dict is rehashing, ht[1] too. lookupKeyRead also checks for expiration (lazy expiration path from expire.c) — if the key has a TTL that has passed, the key is deleted in-flight and the GET returns nil. Our key has no TTL; the lookup hits ht[0]; the value is the robj wrapping our 64-byte SDS string.",
+          "anchorNodeId": "function:src/server.c:call",
+          "codeExcerpt": {
+            "path": "src/server.c",
+            "lineRange": [
+              3300,
+              3450
+            ],
+            "language": "c"
+          }
+        },
+        {
+          "id": "scene-5",
+          "prose": "The value robj is passed to addReplyBulk, which formats the RESP bulk-string response ('$64\\r\\n' + value + '\\r\\n') and appends it to the client's output buffer — not the socket directly. networking.c's sendReplyToClient is registered as a writable handler on the client's fd; it gets called by the event loop when the kernel signals fd 12 is writable, and drains the output buffer to the socket.",
+          "anchorNodeId": "file:src/networking.c"
+        },
+        {
+          "id": "scene-6",
+          "prose": "Back in call(), after the command function returned, propagation runs. GET is a read; nothing to propagate. (A SET would have called feedAppendOnlyFile to log the command to the AOF buffer and replicationFeedSlaves to broadcast to replicas.) call returns; processCommand returns; processInputBuffer checks if there are more commands in the query buffer (no); readQueryFromClient returns; the event loop continues to the next pending event.\n\nAnd that is how a GET moves through Redis."
+        }
+      ],
+      "pullQuote": "Five files, six function calls, no locks — and that is how a GET moves through Redis.",
+      "coda": {
+        "summary": "A GET request enters Redis through epoll, gets parsed by networking.c, dispatched by processCommand+call in server.c, looked up by getCommand against the dict via lookupKeyRead, formatted into RESP by addReplyBulk, and queued to the client's output buffer for the event loop's writable callback to flush. The single-threaded event loop means none of this needs locks. The path passes through the same dict.c code that the Incremental Rehash mechanism walkthrough explains in depth.",
+        "prompts": [
+          {
+            "type": "function-contract",
+            "question": "What does call() do after invoking the command's function pointer?"
+          },
+          {
+            "type": "throughline-retention",
+            "question": "In the GET path traced above, how many distinct files does the command pass through from socket read to socket write?"
+          },
+          {
+            "type": "pattern-recognition",
+            "question": "How does Redis handle the case where the client's socket has unread bytes but is not yet writable? (Hint: separate handlers on the same fd, different event types.)"
+          },
+          {
+            "type": "counterfactual",
+            "question": "If the GET was for a key with TTL that has just expired, where in the path does the expiration check happen and what does the client see?"
+          }
+        ]
+      },
+      "generatedAt": "2026-05-25T09:00:00Z"
+    }
+  ]
+}

@@ -115,6 +115,7 @@ function Dashboard({ accessToken }: { accessToken: string }) {
   const setGraph = useDashboardStore((s) => s.setGraph);
   const setDomainGraph = useDashboardStore((s) => s.setDomainGraph);
   const setMechanismGraph = useDashboardStore((s) => s.setMechanismGraph);
+  const setFlowWalkthroughs = useDashboardStore((s) => s.setFlowWalkthroughs);
   const setDiffOverlay = useDashboardStore((s) => s.setDiffOverlay);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [graphIssues, setGraphIssues] = useState<GraphIssue[]>([]);
@@ -207,9 +208,21 @@ function Dashboard({ accessToken }: { accessToken: string }) {
         } else if (result.fatal) {
           console.warn(`[domain-graph] validation failed: ${result.fatal}`);
         }
+        // Flow walkthroughs sit in a sibling .walkthroughs[] array;
+        // the existing graph validator strips unknown fields, so we
+        // read them from the raw fetch result here.
+        if (
+          data &&
+          typeof data === "object" &&
+          Array.isArray((data as Record<string, unknown>).walkthroughs)
+        ) {
+          setFlowWalkthroughs(
+            (data as Record<string, unknown>).walkthroughs as never
+          );
+        }
       })
       .catch(() => {});
-  }, [setDomainGraph]);
+  }, [setDomainGraph, setFlowWalkthroughs]);
 
   // Mechanism graph — sibling artifact, separate schema. Fetched independently
   // so its absence does not block structural/domain rendering.

@@ -1,0 +1,101 @@
+{
+  "version": "1",
+  "attachedTo": { "kind": "mechanism", "id": "mechanism:the-pointer-as-string" },
+  "shape": "recognition",
+  "title": "The Pointer As String",
+  "subtitle": "Custom string types in C usually break every function that takes a char*. Redis wanted the safety of length-prefixed strings AND the compatibility of bare char* — and got both by hiding the header in a place the compiler didn't expect to look.",
+  "opening": {
+    "problem": "C strings are null-terminated and unsafe. A binary blob with an embedded zero gets truncated at strcpy; computing a length means walking the whole buffer; appending is O(n) every time. A structured string type — a struct with explicit length + buffer — fixes all of that, but it breaks every C standard-library function that takes a char*. printf, write(2), strcmp, strstr, even the % format specifier — none of them know about your struct. Code calling them gets a pointer to your struct's first field, which is the length, not the chars. The whole point of using C — interop with the world's largest body of code that takes char* — collapses.",
+    "tease": "Redis's SDS — Simple Dynamic Strings — is structurally a length-prefixed binary-safe type. It is also, at the call site, a plain char*. Both at once. The trick is structural; once you see it, you cannot un-see it.",
+    "concreteInstance": "We follow one specific SDS string: `s = sdsnew(\"hello\")`. The returned `sds` is, statically, a `typedef char *sds`. Pass it to `printf(\"%s\", s)` and it prints \"hello\". Pass it to `sdslen(s)` and it returns 5 — without scanning the buffer. The reason both work — and the reason `sdslen` doesn't need a parameter telling it which header struct to read — is what this walkthrough explains."
+  },
+  "scenes": [
+    {
+      "id": "scene-1",
+      "prose": "The first thing to look at is the typedef. Line 21 of sds.h declares `typedef char *sds`. That is the type of every SDS string in the codebase. It is, byte-for-byte at the type level, indistinguishable from `char *`. Pass it to a C function and the type checker is satisfied. Cast it back from a `char *` and the type checker is satisfied. There is no struct visible to the call site.\n\nThe structs do exist. Just below the typedef, sds.h defines five of them — `sdshdr5`, `sdshdr8`, `sdshdr16`, `sdshdr32`, `sdshdr64` — chosen by string length so a short string carries only 1 byte of header and a giant string can address 64-bit lengths. All five are `__attribute__((__packed__))` so there's no compiler-inserted alignment. Each ends with `char buf[];` — a flexible array member. The header is followed *immediately* in memory by the actual chars.",
+      "anchorNodeId": "file:src/sds.h",
+      "codeExcerpt": {
+        "path": "src/sds.h",
+        "lineRange": [21, 55],
+        "highlightLine": 21,
+        "language": "c"
+      }
+    },
+    {
+      "id": "scene-2",
+      "prose": "Now the question — how does an SDS string get *constructed*. `sdsnewlen(init, initlen)` (sds.c:195) is the constructor. It picks the smallest header type that can hold `initlen`, allocates `hdrlen + initlen + 1` bytes (header + chars + NUL terminator), copies the init bytes into the buffer region, sets the header fields. The line that matters most is the return value.\n\nThe constructor does **not** return a pointer to the start of the allocation. It returns a pointer to the **buf** field of the header — that is, a pointer to the first char of the actual string data. The header is *before* that pointer in memory. The caller gets back something they can hand to printf. The bookkeeping is hidden at negative offsets.",
+      "anchorNodeId": "file:src/sds.c",
+      "codeExcerpt": {
+        "path": "src/sds.c",
+        "lineRange": [195, 220],
+        "language": "c"
+      }
+    },
+    {
+      "id": "scene-3",
+      "prose": "Look at how `sdslen` reads the length back. The function takes a `const sds s` — a `const char *`, no struct in sight. It needs to know which header type sits behind the pointer. The answer is a one-byte tag stored at `s[-1]` — exactly one byte before the pointer. That byte is the `flags` field of whichever header type is in use; its low 3 bits encode which struct to read.\n\nSwitch on those 3 bits. For `SDS_TYPE_8`, cast `s - sizeof(sdshdr8)` back to a `sdshdr8 *`. Read `->len`. Done — O(1), no scan. The header was sitting there the whole time; the trick was that the caller never saw it. The pointer arithmetic walks backwards into memory the *allocator returned but the function signature concealed*.",
+      "anchorNodeId": "file:src/sds.h",
+      "codeExcerpt": {
+        "path": "src/sds.h",
+        "lineRange": [95, 115],
+        "highlightLine": 98,
+        "language": "c"
+      },
+      "isClimax": true
+    },
+    {
+      "id": "scene-4",
+      "prose": "What this buys is profound. `s` is a `char *`. It works with the entire C standard library. It also has hidden length, hidden capacity (`alloc` field), and hidden type discrimination — all reachable via tiny inline functions that subtract from the pointer and read. The constructor returns a pointer in the middle of an allocation; the destructor takes a pointer in the middle of an allocation and frees the allocation header by subtracting first. Code that wants the safety uses SDS-aware functions; code that wants the compatibility uses the same pointer with C library functions.\n\nThere is one rule, and it is the only thing the user must respect: never `free()` an SDS pointer directly. You must call `sdsfree()`, which subtracts to find the allocation start. `free(s)` passes the chars-pointer to the allocator, which doesn't know there's a header behind it, and the free goes wrong. The C language has no way to encode this constraint in the type system; you just have to remember.",
+      "anchorNodeId": "file:src/sds.h",
+      "embed": {
+        "kind": "beat",
+        "beatType": "predict-outcome",
+        "question": "You write `sds s = sdsnew(\"hello\"); printf(\"%s, length %zu\\n\", s, strlen(s));`. What does it print?",
+        "candidates": [
+          "hello, length 5",
+          "hello, length 0",
+          "Garbage characters, segfault",
+          "Empty string, length 0"
+        ],
+        "answerIndex": 0,
+        "reveal": "It prints \"hello, length 5\". printf sees a char* pointing to 'h', 'e', 'l', 'l', 'o', '\\0' and stops at the null. strlen scans the same chars and returns 5. The SDS header is sitting at s[-something] but no C-library function reaches there. Everything works as if you had written `char s[] = \"hello\"` — *plus* sdslen(s) is O(1) and you have a free-buffer field for amortized appends.",
+        "windowSeconds": 8
+      }
+    },
+    {
+      "id": "scene-5",
+      "prose": "The same idea recurs once you know to look for it. Object headers in JavaScript V8 are hidden at negative offsets from the value pointer. Reference counts in many C++ shared_ptr implementations live at -16 bytes from the controlled object pointer when the control block is fused with the object. Malloc-aware free implementations look at the bytes just before the user pointer to find the chunk header. The general shape: the type system shows the user a `T*`, but the implementation puts metadata *before* the T in memory, accessible only to code that knows about it. The user pointer is a viewport into a larger structure; the structure's other fields are reachable by subtracting.\n\nSDS is the cleanest small example of the pattern in any open-source C codebase. Five header variants, one flags byte at s[-1], one tiny switch statement in every accessor. The reader of SDS code that does not know this trick will spend an afternoon being confused by the inline functions. The reader who knows it sees them immediately."
+    }
+  ],
+  "pullQuote": "The constructor returns a pointer not to the start of the allocation but to its char buffer — the header sits at negative offsets, invisible to every C library function but reachable by everyone who knows it's there.",
+  "coda": {
+    "summary": "Redis's SDS strings are typedef'd as plain char*. The structural data — length, capacity, type discriminator — lives in a header packed immediately before the chars in memory. Every SDS accessor subtracts from the pointer to find the header; every consumer of the chars passes the pointer directly to printf, strcmp, write, etc. and gets correct behavior. One pointer, two memory regions, one type to the type checker.",
+    "prompts": [
+      {
+        "type": "bit-layout",
+        "question": "In an SDS string of type SDS_TYPE_8, where exactly does the length field sit relative to the returned sds pointer? Express your answer in bytes."
+      },
+      {
+        "type": "counterfactual",
+        "question": "What would happen if a user wrote `free(s)` instead of `sdsfree(s)` on an SDS string of type SDS_TYPE_16?"
+      },
+      {
+        "type": "function-contract",
+        "question": "Why is the sds typedef `char *` and not `void *` or a struct? What does the choice buy and what does it cost?"
+      },
+      {
+        "type": "throughline-retention",
+        "question": "For `s = sdsnew(\"hello\")`, what is at memory address s[-1]?"
+      },
+      {
+        "type": "pattern-recognition",
+        "question": "Name the general pattern: a constructor returns a pointer not to the start of its allocation but to a field inside it, with metadata at known negative offsets only the accessor functions know to read."
+      },
+      {
+        "type": "beacon",
+        "question": "Where else in Redis (or in any C codebase you know) does a pointer's metadata live at a fixed negative offset from the pointer itself?"
+      }
+    ]
+  },
+  "generatedAt": "2026-05-25T16:00:00Z"
+}

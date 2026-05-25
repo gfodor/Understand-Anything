@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useCallback } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { useDashboardStore } from "../store";
@@ -17,7 +17,21 @@ export type FlowFlowNode = Node<FlowNodeData, "flow-node">;
 function FlowNode({ data }: NodeProps<FlowFlowNode>) {
   const selectNode = useDashboardStore((s) => s.selectNode);
   const selectedNodeId = useDashboardStore((s) => s.selectedNodeId);
+  const flowWalkthroughs = useDashboardStore((s) => s.flowWalkthroughs);
+  const openWalkthrough = useDashboardStore((s) => s.openWalkthrough);
   const isSelected = selectedNodeId === data.flowId;
+
+  const walkthrough = flowWalkthroughs.find(
+    (w) => w.attachedTo?.kind === "flow" && w.attachedTo?.id === data.flowId,
+  );
+
+  const onReadClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (walkthrough) openWalkthrough(walkthrough);
+    },
+    [walkthrough, openWalkthrough],
+  );
 
   return (
     <div
@@ -42,8 +56,20 @@ function FlowNode({ data }: NodeProps<FlowFlowNode>) {
       <div className="text-[10px] text-text-secondary line-clamp-2">
         {data.summary}
       </div>
-      <div className="text-[9px] text-text-muted mt-1">
-        {data.stepCount} step{data.stepCount !== 1 ? "s" : ""}
+      <div className="flex items-center justify-between mt-1.5 gap-2">
+        <div className="text-[9px] text-text-muted">
+          {data.stepCount} step{data.stepCount !== 1 ? "s" : ""}
+        </div>
+        {walkthrough && (
+          <button
+            type="button"
+            onClick={onReadClick}
+            className="text-[9px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-accent text-white hover:bg-accent/90"
+            aria-label={`Read walkthrough: ${walkthrough.title}`}
+          >
+            Read →
+          </button>
+        )}
       </div>
     </div>
   );

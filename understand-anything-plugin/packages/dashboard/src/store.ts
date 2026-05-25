@@ -207,6 +207,12 @@ interface DashboardStore {
   mechanismGraph: MechanismGraph | null;
   setMechanismGraph: (graph: MechanismGraph | null) => void;
 
+  // Flow walkthroughs — sibling array on domain-graph.json, indexed by
+  // the flow id they attach to. Looked up by FlowNode to render the
+  // "Read walkthrough" affordance.
+  flowWalkthroughs: Walkthrough[];
+  setFlowWalkthroughs: (walkthroughs: Walkthrough[]) => void;
+
   // Walkthrough reader (modal — episodic, not navigational)
   walkthroughOpen: boolean;
   activeWalkthrough: Walkthrough | null;
@@ -693,6 +699,9 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
 
   mechanismGraph: null,
   setMechanismGraph: (graph) => set({ mechanismGraph: graph }),
+
+  flowWalkthroughs: [],
+  setFlowWalkthroughs: (walkthroughs) => set({ flowWalkthroughs: walkthroughs }),
 
   walkthroughOpen: false,
   activeWalkthrough: null,

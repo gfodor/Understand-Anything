@@ -175,7 +175,120 @@
         "string",
         "data-structure",
         "compat"
-      ]
+      ],
+      "walkthrough": {
+        "version": "1",
+        "attachedTo": {
+          "kind": "mechanism",
+          "id": "mechanism:the-pointer-as-string"
+        },
+        "shape": "recognition",
+        "title": "The Pointer As String",
+        "subtitle": "Custom string types in C usually break every function that takes a char*. Redis wanted the safety of length-prefixed strings AND the compatibility of bare char* — and got both by hiding the header in a place the compiler didn't expect to look.",
+        "opening": {
+          "problem": "C strings are null-terminated and unsafe. A binary blob with an embedded zero gets truncated at strcpy; computing a length means walking the whole buffer; appending is O(n) every time. A structured string type — a struct with explicit length + buffer — fixes all of that, but it breaks every C standard-library function that takes a char*. printf, write(2), strcmp, strstr, even the % format specifier — none of them know about your struct. Code calling them gets a pointer to your struct's first field, which is the length, not the chars. The whole point of using C — interop with the world's largest body of code that takes char* — collapses.",
+          "tease": "Redis's SDS — Simple Dynamic Strings — is structurally a length-prefixed binary-safe type. It is also, at the call site, a plain char*. Both at once. The trick is structural; once you see it, you cannot un-see it.",
+          "concreteInstance": "We follow one specific SDS string: `s = sdsnew(\"hello\")`. The returned `sds` is, statically, a `typedef char *sds`. Pass it to `printf(\"%s\", s)` and it prints \"hello\". Pass it to `sdslen(s)` and it returns 5 — without scanning the buffer. The reason both work — and the reason `sdslen` doesn't need a parameter telling it which header struct to read — is what this walkthrough explains."
+        },
+        "scenes": [
+          {
+            "id": "scene-1",
+            "prose": "The first thing to look at is the typedef. Line 21 of sds.h declares `typedef char *sds`. That is the type of every SDS string in the codebase. It is, byte-for-byte at the type level, indistinguishable from `char *`. Pass it to a C function and the type checker is satisfied. Cast it back from a `char *` and the type checker is satisfied. There is no struct visible to the call site.\n\nThe structs do exist. Just below the typedef, sds.h defines five of them — `sdshdr5`, `sdshdr8`, `sdshdr16`, `sdshdr32`, `sdshdr64` — chosen by string length so a short string carries only 1 byte of header and a giant string can address 64-bit lengths. All five are `__attribute__((__packed__))` so there's no compiler-inserted alignment. Each ends with `char buf[];` — a flexible array member. The header is followed *immediately* in memory by the actual chars.",
+            "anchorNodeId": "file:src/sds.h",
+            "codeExcerpt": {
+              "path": "src/sds.h",
+              "lineRange": [
+                21,
+                55
+              ],
+              "highlightLine": 21,
+              "language": "c"
+            }
+          },
+          {
+            "id": "scene-2",
+            "prose": "Now the question — how does an SDS string get *constructed*. `sdsnewlen(init, initlen)` (sds.c:195) is the constructor. It picks the smallest header type that can hold `initlen`, allocates `hdrlen + initlen + 1` bytes (header + chars + NUL terminator), copies the init bytes into the buffer region, sets the header fields. The line that matters most is the return value.\n\nThe constructor does **not** return a pointer to the start of the allocation. It returns a pointer to the **buf** field of the header — that is, a pointer to the first char of the actual string data. The header is *before* that pointer in memory. The caller gets back something they can hand to printf. The bookkeeping is hidden at negative offsets.",
+            "anchorNodeId": "file:src/sds.c",
+            "codeExcerpt": {
+              "path": "src/sds.c",
+              "lineRange": [
+                195,
+                220
+              ],
+              "language": "c"
+            }
+          },
+          {
+            "id": "scene-3",
+            "prose": "Look at how `sdslen` reads the length back. The function takes a `const sds s` — a `const char *`, no struct in sight. It needs to know which header type sits behind the pointer. The answer is a one-byte tag stored at `s[-1]` — exactly one byte before the pointer. That byte is the `flags` field of whichever header type is in use; its low 3 bits encode which struct to read.\n\nSwitch on those 3 bits. For `SDS_TYPE_8`, cast `s - sizeof(sdshdr8)` back to a `sdshdr8 *`. Read `->len`. Done — O(1), no scan. The header was sitting there the whole time; the trick was that the caller never saw it. The pointer arithmetic walks backwards into memory the *allocator returned but the function signature concealed*.",
+            "anchorNodeId": "file:src/sds.h",
+            "codeExcerpt": {
+              "path": "src/sds.h",
+              "lineRange": [
+                95,
+                115
+              ],
+              "highlightLine": 98,
+              "language": "c"
+            },
+            "isClimax": true
+          },
+          {
+            "id": "scene-4",
+            "prose": "What this buys is profound. `s` is a `char *`. It works with the entire C standard library. It also has hidden length, hidden capacity (`alloc` field), and hidden type discrimination — all reachable via tiny inline functions that subtract from the pointer and read. The constructor returns a pointer in the middle of an allocation; the destructor takes a pointer in the middle of an allocation and frees the allocation header by subtracting first. Code that wants the safety uses SDS-aware functions; code that wants the compatibility uses the same pointer with C library functions.\n\nThere is one rule, and it is the only thing the user must respect: never `free()` an SDS pointer directly. You must call `sdsfree()`, which subtracts to find the allocation start. `free(s)` passes the chars-pointer to the allocator, which doesn't know there's a header behind it, and the free goes wrong. The C language has no way to encode this constraint in the type system; you just have to remember.",
+            "anchorNodeId": "file:src/sds.h",
+            "embed": {
+              "kind": "beat",
+              "beatType": "predict-outcome",
+              "question": "You write `sds s = sdsnew(\"hello\"); printf(\"%s, length %zu\\n\", s, strlen(s));`. What does it print?",
+              "candidates": [
+                "hello, length 5",
+                "hello, length 0",
+                "Garbage characters, segfault",
+                "Empty string, length 0"
+              ],
+              "answerIndex": 0,
+              "reveal": "It prints \"hello, length 5\". printf sees a char* pointing to 'h', 'e', 'l', 'l', 'o', '\\0' and stops at the null. strlen scans the same chars and returns 5. The SDS header is sitting at s[-something] but no C-library function reaches there. Everything works as if you had written `char s[] = \"hello\"` — *plus* sdslen(s) is O(1) and you have a free-buffer field for amortized appends.",
+              "windowSeconds": 8
+            }
+          },
+          {
+            "id": "scene-5",
+            "prose": "The same idea recurs once you know to look for it. Object headers in JavaScript V8 are hidden at negative offsets from the value pointer. Reference counts in many C++ shared_ptr implementations live at -16 bytes from the controlled object pointer when the control block is fused with the object. Malloc-aware free implementations look at the bytes just before the user pointer to find the chunk header. The general shape: the type system shows the user a `T*`, but the implementation puts metadata *before* the T in memory, accessible only to code that knows about it. The user pointer is a viewport into a larger structure; the structure's other fields are reachable by subtracting.\n\nSDS is the cleanest small example of the pattern in any open-source C codebase. Five header variants, one flags byte at s[-1], one tiny switch statement in every accessor. The reader of SDS code that does not know this trick will spend an afternoon being confused by the inline functions. The reader who knows it sees them immediately."
+          }
+        ],
+        "pullQuote": "The constructor returns a pointer not to the start of the allocation but to its char buffer — the header sits at negative offsets, invisible to every C library function but reachable by everyone who knows it's there.",
+        "coda": {
+          "summary": "Redis's SDS strings are typedef'd as plain char*. The structural data — length, capacity, type discriminator — lives in a header packed immediately before the chars in memory. Every SDS accessor subtracts from the pointer to find the header; every consumer of the chars passes the pointer directly to printf, strcmp, write, etc. and gets correct behavior. One pointer, two memory regions, one type to the type checker.",
+          "prompts": [
+            {
+              "type": "bit-layout",
+              "question": "In an SDS string of type SDS_TYPE_8, where exactly does the length field sit relative to the returned sds pointer? Express your answer in bytes."
+            },
+            {
+              "type": "counterfactual",
+              "question": "What would happen if a user wrote `free(s)` instead of `sdsfree(s)` on an SDS string of type SDS_TYPE_16?"
+            },
+            {
+              "type": "function-contract",
+              "question": "Why is the sds typedef `char *` and not `void *` or a struct? What does the choice buy and what does it cost?"
+            },
+            {
+              "type": "throughline-retention",
+              "question": "For `s = sdsnew(\"hello\")`, what is at memory address s[-1]?"
+            },
+            {
+              "type": "pattern-recognition",
+              "question": "Name the general pattern: a constructor returns a pointer not to the start of its allocation but to a field inside it, with metadata at known negative offsets only the accessor functions know to read."
+            },
+            {
+              "type": "beacon",
+              "question": "Where else in Redis (or in any C codebase you know) does a pointer's metadata live at a fixed negative offset from the pointer itself?"
+            }
+          ]
+        },
+        "generatedAt": "2026-05-25T16:00:00Z"
+      }
     },
     {
       "id": "mechanism:the-os-as-snapshot",
@@ -196,7 +309,111 @@
         "fork",
         "cow",
         "os"
-      ]
+      ],
+      "walkthrough": {
+        "version": "1",
+        "attachedTo": {
+          "kind": "mechanism",
+          "id": "mechanism:the-os-as-snapshot"
+        },
+        "shape": "recognition",
+        "title": "The OS As Snapshot",
+        "subtitle": "Snapshotting a live in-memory database is two problems: get a consistent point-in-time view, and write it without blocking. Most databases solve both by writing thousands of lines of cooperation code. Redis solved both by writing zero.",
+        "opening": {
+          "problem": "An in-memory database that survives a crash needs to occasionally write its full state to disk. The single-threaded server process holds gigabytes of live data in memory — keyspace dicts, value strings, list and hash structures — and it is constantly mutating that data as new commands arrive. Snapshotting that state is two problems running into each other: getting a consistent point-in-time view despite ongoing mutations, and writing gigabytes of bytes to disk slowly without blocking the server's command loop. Conventional solutions require deep cooperation from every data type — long-running write transactions, copy-on-write data structures, software-emulated multiversioning. Each one adds bytes to every hot-path operation and cycles to every read.",
+          "tease": "Redis writes zero such code. It does not maintain transactions; it does not version its data structures; it does not even know what \"snapshot consistency\" means. And yet `BGSAVE` produces a consistent point-in-time snapshot of the entire keyspace while the server continues serving traffic at full speed.",
+          "concreteInstance": "We follow one specific BGSAVE. A Redis instance is holding 4 GB of live data; 200 connected clients are issuing roughly 10,000 commands per second; the user types `BGSAVE` at the redis-cli. Forty-five seconds later, an RDB file on disk contains a byte-for-byte consistent snapshot of the dataset as it existed at the moment BGSAVE was invoked. During those 45 seconds, the server's p99 command latency stays under a millisecond. The clients never noticed."
+        },
+        "scenes": [
+          {
+            "id": "scene-1",
+            "prose": "The function that starts a background save is `rdbSaveBackground` in `rdb.c`. By any reasonable software-engineering standard it is shockingly short. It validates that no other child process is currently running. It records some stats. Then it calls `redisFork(CHILD_TYPE_RDB)` and branches on the return value.\n\n`fork()` is a 1970s-vintage Unix system call. It creates a new process whose memory is, immediately after the call, identical to the parent's memory. Two processes, two PIDs, same data. In the parent, fork returns the child's PID. In the child, fork returns 0. That is the entirety of the call's contract.",
+            "anchorNodeId": "function:src/rdb.c:rdbSaveBackground",
+            "codeExcerpt": {
+              "path": "src/rdb.c",
+              "lineRange": [
+                2070,
+                2090
+              ],
+              "highlightLine": 2079,
+              "language": "c"
+            }
+          },
+          {
+            "id": "scene-2",
+            "prose": "The child branch is where the snapshot work happens. The child calls `rdbSave(filename, ...)`, which walks the in-memory keyspace dict, encodes every key-value pair into the RDB binary format, and writes it to the named file. The child then exits.\n\nDuring those 45 seconds the child is walking the dataset, what is the parent doing? It is continuing to serve traffic. Clients are sending GET, SET, DEL, LPUSH, ZADD; the parent is mutating the keyspace; commands are landing at 10,000 per second. The parent never blocks. The parent does not coordinate with the child. The parent does not read a snapshot marker, take a lock, version a key, or notify anyone. The parent runs exactly as if `rdbSaveBackground` had returned immediately to its single user — because in the parent's memory space, it did.",
+            "anchorNodeId": "function:src/rdb.c:rdbSaveBackground",
+            "codeExcerpt": {
+              "path": "src/rdb.c",
+              "lineRange": [
+                2079,
+                2103
+              ],
+              "highlightLine": 2086,
+              "language": "c"
+            }
+          },
+          {
+            "id": "scene-3",
+            "prose": "Here is what makes this work, and it is a property of the operating system, not of Redis. When fork() returns, the parent and child *appear* to have separate copies of memory, but they don't — they share the same physical pages, marked read-only. As long as both processes only *read*, no copy is made. The instant the parent writes to a page — a single byte mutation anywhere in those 4 GB — the kernel transparently allocates a fresh physical page, copies the original page contents to it, points the parent's virtual address at the new page, and lets the write proceed. The child still sees the original page. The child still sees what was there at the moment of fork.\n\nThis is copy-on-write, and it is the mechanism the entire Redis snapshot architecture rests on. The fork() call gave the child a logically-consistent view of every byte the parent owned at the instant of forking. The OS's virtual memory subsystem maintains that consistency without Redis writing a line of code to enforce it. The parent's mutations, after the fork, cost one extra page-copy each, paid by the kernel, invisible to either process.",
+            "anchorNodeId": "function:src/rdb.c:rdbSaveBackground",
+            "embed": {
+              "kind": "beat",
+              "beatType": "predict-outcome",
+              "question": "During the 45-second BGSAVE, a client sends `SET counter 42`. The 'counter' key was already in memory at the time of the fork with value '17'. What does the child write to the RDB file for the 'counter' key?",
+              "candidates": [
+                "42 — the new value",
+                "17 — the value at the time of the fork",
+                "Both values in succession",
+                "An error indicating the data changed mid-snapshot"
+              ],
+              "answerIndex": 1,
+              "reveal": "The child writes 17 — the value at the time of the fork. The parent's SET modified its own copy of the page (CoW'd by the kernel); the child still sees the original page containing 17. The RDB snapshot is point-in-time consistent: it captures the state exactly at the instant rdbSaveBackground was called, regardless of what the parent does next.",
+              "windowSeconds": 8
+            },
+            "isClimax": true
+          },
+          {
+            "id": "scene-4",
+            "prose": "The cost analysis is worth a moment. The child process inherits all 4 GB of the parent's virtual memory, but no physical pages are copied at fork time — they are shared and marked read-only. The kernel needs only a few milliseconds to set up the page table mappings. So the fork itself is cheap.\n\nDuring the snapshot, the parent's mutations trigger CoW page copies. The cost is proportional to the *write rate* during the save, not to the *dataset size*. A heavily-written database during a 45-second save might CoW a meaningful fraction of its pages and effectively double its memory usage transiently. A read-mostly database snapshots almost for free. The architectural tradeoff is honest: Redis is optimized for read-heavy and burst-write workloads precisely because that is where this scheme produces the best results.\n\nThe same fork+CoW trick appears unchanged in `rewriteAppendOnlyFileBackground` (aof.c) — AOF rewrite forks, child writes a compacted log, parent buffers new commands and ships them to the child at the end. And in `replicationFeedSlaves` indirectly: a new replica syncs by triggering a fork-based RDB transfer. Every persistence-adjacent operation in Redis routes through fork."
+          },
+          {
+            "id": "scene-5",
+            "prose": "What this codebase did not have to write to make BGSAVE work: a multiversion concurrency control system; a snapshot transaction protocol; a write-ahead log; cooperative copy-on-write data structures; locks on the keyspace; a background snapshot thread with its own scheduling. What it did write: a fork call and a few status checks. The actual snapshot machinery — point-in-time consistency, isolation from concurrent writes, the entire algorithm — is a feature of Unix that has been present since the 1970s and that Redis simply asks for by name.\n\nFor a piece of software whose performance is the entire reason it exists, the most striking design choice is sometimes the absence of an algorithm. The OS is doing the work."
+          }
+        ],
+        "pullQuote": "Redis does not snapshot its memory. It forks, and the kernel's copy-on-write semantics produce the snapshot for free — point-in-time consistent, isolated from concurrent writes, with no cooperation from any data structure inside the database.",
+        "coda": {
+          "summary": "Redis's BGSAVE is twenty lines of C around a single fork() call. The child inherits a copy-on-write view of the parent's entire memory; the OS lazily copies any page the parent subsequently mutates. The child walks the dataset and writes it to disk in the consistent state it had at fork time; the parent continues serving traffic uninterrupted. The same trick powers AOF rewrite and replication's initial sync. Redis writes no snapshot-isolation code; it asks the operating system to provide the isolation, which the kernel has been able to do since the 1970s.",
+          "prompts": [
+            {
+              "type": "function-contract",
+              "question": "After `rdbSaveBackground` calls `redisFork(CHILD_TYPE_RDB)`, what is the return value in the parent process versus the child process?"
+            },
+            {
+              "type": "counterfactual",
+              "question": "Suppose the parent has a 4 GB dataset and writes to every page during a 45-second BGSAVE. How much extra memory does the system use at the peak?"
+            },
+            {
+              "type": "timing",
+              "question": "Approximately how long does the fork() call itself take, and what is the dominant cost during the rest of the BGSAVE window?"
+            },
+            {
+              "type": "throughline-retention",
+              "question": "In the worked example, a client SETs `counter` from 17 to 42 during the BGSAVE. What does the RDB file contain for that key, and why?"
+            },
+            {
+              "type": "pattern-recognition",
+              "question": "Name the general design pattern: an in-process algorithm is replaced by asking the operating system to provide the equivalent semantics via a single system call."
+            },
+            {
+              "type": "beacon",
+              "question": "Where else in Redis is fork() used for the same purpose? Cite at least one other file/function."
+            }
+          ]
+        },
+        "generatedAt": "2026-05-25T16:30:00Z"
+      }
     },
     {
       "id": "mechanism:the-encoding-promotion",

@@ -1,0 +1,95 @@
+{
+  "version": "1",
+  "attachedTo": { "kind": "mechanism", "id": "mechanism:the-os-as-snapshot" },
+  "shape": "recognition",
+  "title": "The OS As Snapshot",
+  "subtitle": "Snapshotting a live in-memory database is two problems: get a consistent point-in-time view, and write it without blocking. Most databases solve both by writing thousands of lines of cooperation code. Redis solved both by writing zero.",
+  "opening": {
+    "problem": "An in-memory database that survives a crash needs to occasionally write its full state to disk. The single-threaded server process holds gigabytes of live data in memory — keyspace dicts, value strings, list and hash structures — and it is constantly mutating that data as new commands arrive. Snapshotting that state is two problems running into each other: getting a consistent point-in-time view despite ongoing mutations, and writing gigabytes of bytes to disk slowly without blocking the server's command loop. Conventional solutions require deep cooperation from every data type — long-running write transactions, copy-on-write data structures, software-emulated multiversioning. Each one adds bytes to every hot-path operation and cycles to every read.",
+    "tease": "Redis writes zero such code. It does not maintain transactions; it does not version its data structures; it does not even know what \"snapshot consistency\" means. And yet `BGSAVE` produces a consistent point-in-time snapshot of the entire keyspace while the server continues serving traffic at full speed.",
+    "concreteInstance": "We follow one specific BGSAVE. A Redis instance is holding 4 GB of live data; 200 connected clients are issuing roughly 10,000 commands per second; the user types `BGSAVE` at the redis-cli. Forty-five seconds later, an RDB file on disk contains a byte-for-byte consistent snapshot of the dataset as it existed at the moment BGSAVE was invoked. During those 45 seconds, the server's p99 command latency stays under a millisecond. The clients never noticed."
+  },
+  "scenes": [
+    {
+      "id": "scene-1",
+      "prose": "The function that starts a background save is `rdbSaveBackground` in `rdb.c`. By any reasonable software-engineering standard it is shockingly short. It validates that no other child process is currently running. It records some stats. Then it calls `redisFork(CHILD_TYPE_RDB)` and branches on the return value.\n\n`fork()` is a 1970s-vintage Unix system call. It creates a new process whose memory is, immediately after the call, identical to the parent's memory. Two processes, two PIDs, same data. In the parent, fork returns the child's PID. In the child, fork returns 0. That is the entirety of the call's contract.",
+      "anchorNodeId": "function:src/rdb.c:rdbSaveBackground",
+      "codeExcerpt": {
+        "path": "src/rdb.c",
+        "lineRange": [2070, 2090],
+        "highlightLine": 2079,
+        "language": "c"
+      }
+    },
+    {
+      "id": "scene-2",
+      "prose": "The child branch is where the snapshot work happens. The child calls `rdbSave(filename, ...)`, which walks the in-memory keyspace dict, encodes every key-value pair into the RDB binary format, and writes it to the named file. The child then exits.\n\nDuring those 45 seconds the child is walking the dataset, what is the parent doing? It is continuing to serve traffic. Clients are sending GET, SET, DEL, LPUSH, ZADD; the parent is mutating the keyspace; commands are landing at 10,000 per second. The parent never blocks. The parent does not coordinate with the child. The parent does not read a snapshot marker, take a lock, version a key, or notify anyone. The parent runs exactly as if `rdbSaveBackground` had returned immediately to its single user — because in the parent's memory space, it did.",
+      "anchorNodeId": "function:src/rdb.c:rdbSaveBackground",
+      "codeExcerpt": {
+        "path": "src/rdb.c",
+        "lineRange": [2079, 2103],
+        "highlightLine": 2086,
+        "language": "c"
+      }
+    },
+    {
+      "id": "scene-3",
+      "prose": "Here is what makes this work, and it is a property of the operating system, not of Redis. When fork() returns, the parent and child *appear* to have separate copies of memory, but they don't — they share the same physical pages, marked read-only. As long as both processes only *read*, no copy is made. The instant the parent writes to a page — a single byte mutation anywhere in those 4 GB — the kernel transparently allocates a fresh physical page, copies the original page contents to it, points the parent's virtual address at the new page, and lets the write proceed. The child still sees the original page. The child still sees what was there at the moment of fork.\n\nThis is copy-on-write, and it is the mechanism the entire Redis snapshot architecture rests on. The fork() call gave the child a logically-consistent view of every byte the parent owned at the instant of forking. The OS's virtual memory subsystem maintains that consistency without Redis writing a line of code to enforce it. The parent's mutations, after the fork, cost one extra page-copy each, paid by the kernel, invisible to either process.",
+      "anchorNodeId": "function:src/rdb.c:rdbSaveBackground",
+      "isClimax": true,
+      "embed": {
+        "kind": "beat",
+        "beatType": "predict-outcome",
+        "question": "During the 45-second BGSAVE, a client sends `SET counter 42`. The 'counter' key was already in memory at the time of the fork with value '17'. What does the child write to the RDB file for the 'counter' key?",
+        "candidates": [
+          "42 — the new value",
+          "17 — the value at the time of the fork",
+          "Both values in succession",
+          "An error indicating the data changed mid-snapshot"
+        ],
+        "answerIndex": 1,
+        "reveal": "The child writes 17 — the value at the time of the fork. The parent's SET modified its own copy of the page (CoW'd by the kernel); the child still sees the original page containing 17. The RDB snapshot is point-in-time consistent: it captures the state exactly at the instant rdbSaveBackground was called, regardless of what the parent does next.",
+        "windowSeconds": 8
+      }
+    },
+    {
+      "id": "scene-4",
+      "prose": "The cost analysis is worth a moment. The child process inherits all 4 GB of the parent's virtual memory, but no physical pages are copied at fork time — they are shared and marked read-only. The kernel needs only a few milliseconds to set up the page table mappings. So the fork itself is cheap.\n\nDuring the snapshot, the parent's mutations trigger CoW page copies. The cost is proportional to the *write rate* during the save, not to the *dataset size*. A heavily-written database during a 45-second save might CoW a meaningful fraction of its pages and effectively double its memory usage transiently. A read-mostly database snapshots almost for free. The architectural tradeoff is honest: Redis is optimized for read-heavy and burst-write workloads precisely because that is where this scheme produces the best results.\n\nThe same fork+CoW trick appears unchanged in `rewriteAppendOnlyFileBackground` (aof.c) — AOF rewrite forks, child writes a compacted log, parent buffers new commands and ships them to the child at the end. And in `replicationFeedSlaves` indirectly: a new replica syncs by triggering a fork-based RDB transfer. Every persistence-adjacent operation in Redis routes through fork."
+    },
+    {
+      "id": "scene-5",
+      "prose": "What this codebase did not have to write to make BGSAVE work: a multiversion concurrency control system; a snapshot transaction protocol; a write-ahead log; cooperative copy-on-write data structures; locks on the keyspace; a background snapshot thread with its own scheduling. What it did write: a fork call and a few status checks. The actual snapshot machinery — point-in-time consistency, isolation from concurrent writes, the entire algorithm — is a feature of Unix that has been present since the 1970s and that Redis simply asks for by name.\n\nFor a piece of software whose performance is the entire reason it exists, the most striking design choice is sometimes the absence of an algorithm. The OS is doing the work."
+    }
+  ],
+  "pullQuote": "Redis does not snapshot its memory. It forks, and the kernel's copy-on-write semantics produce the snapshot for free — point-in-time consistent, isolated from concurrent writes, with no cooperation from any data structure inside the database.",
+  "coda": {
+    "summary": "Redis's BGSAVE is twenty lines of C around a single fork() call. The child inherits a copy-on-write view of the parent's entire memory; the OS lazily copies any page the parent subsequently mutates. The child walks the dataset and writes it to disk in the consistent state it had at fork time; the parent continues serving traffic uninterrupted. The same trick powers AOF rewrite and replication's initial sync. Redis writes no snapshot-isolation code; it asks the operating system to provide the isolation, which the kernel has been able to do since the 1970s.",
+    "prompts": [
+      {
+        "type": "function-contract",
+        "question": "After `rdbSaveBackground` calls `redisFork(CHILD_TYPE_RDB)`, what is the return value in the parent process versus the child process?"
+      },
+      {
+        "type": "counterfactual",
+        "question": "Suppose the parent has a 4 GB dataset and writes to every page during a 45-second BGSAVE. How much extra memory does the system use at the peak?"
+      },
+      {
+        "type": "timing",
+        "question": "Approximately how long does the fork() call itself take, and what is the dominant cost during the rest of the BGSAVE window?"
+      },
+      {
+        "type": "throughline-retention",
+        "question": "In the worked example, a client SETs `counter` from 17 to 42 during the BGSAVE. What does the RDB file contain for that key, and why?"
+      },
+      {
+        "type": "pattern-recognition",
+        "question": "Name the general design pattern: an in-process algorithm is replaced by asking the operating system to provide the equivalent semantics via a single system call."
+      },
+      {
+        "type": "beacon",
+        "question": "Where else in Redis is fork() used for the same purpose? Cite at least one other file/function."
+      }
+    ]
+  },
+  "generatedAt": "2026-05-25T16:30:00Z"
+}
