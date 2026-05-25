@@ -568,12 +568,16 @@ function StickyCodePane({
   hoveredSymbol: string | null;
 }) {
   // Two-layer structure so position:sticky works inside a CSS grid:
-  // the <aside> is the grid item and stretches to row height (the
-  // prose column dictates row height; the aside fills it). The inner
-  // div is what actually sticks, positioned top:12px within the
-  // tall aside.
+  // the <aside> is the grid item with NO height of its own — the
+  // grid's default align-items:stretch lets it fill the row height,
+  // which is dictated by the (tall) prose column. The inner div is
+  // what actually sticks, positioned top:12px within that tall
+  // aside. Setting height:100% on the aside was previously
+  // collapsing it to the inner div's height (because percentages
+  // resolve to auto when the parent's height is auto), which left
+  // sticky with zero room to scroll within.
   return (
-    <aside style={{ position: "relative", height: "100%" }}>
+    <aside>
       <div
         style={{
           position: "sticky",
