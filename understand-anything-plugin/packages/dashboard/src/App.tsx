@@ -36,11 +36,14 @@ const OnboardingOverlay = lazy(() => import("./components/OnboardingOverlay"));
 const WalkthroughReader = lazy(() =>
   import("./components/WalkthroughReader").then((m) => ({ default: m.WalkthroughReader })),
 );
+const MechanismsPanel = lazy(() =>
+  import("./components/MechanismsPanel").then((m) => ({ default: m.MechanismsPanel })),
+);
 
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 const SESSION_TOKEN_KEY = "understand-anything-token";
 const ONBOARDING_DISMISSED_KEY = "ua-onboarding-dismissed-v1";
-type SidebarTab = "info" | "files";
+type SidebarTab = "info" | "files" | "mechanisms";
 
 function shouldShowOnboarding(): boolean {
   if (typeof window === "undefined") return false;
@@ -428,7 +431,7 @@ function DashboardContent({
   const sidebarContent = (
     <div className="h-full flex flex-col min-h-0">
       <div className="flex items-center gap-1 p-2 border-b border-border-subtle bg-surface shrink-0">
-        {(["info", "files"] as const).map((tab) => (
+        {(["info", "files", "mechanisms"] as const).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -439,12 +442,24 @@ function DashboardContent({
                 : "text-text-muted hover:text-text-primary hover:bg-elevated"
             }`}
           >
-            {tab === "info" ? t.sidebar.info : t.sidebar.files}
+            {tab === "info"
+              ? t.sidebar.info
+              : tab === "files"
+                ? t.sidebar.files
+                : "Mechanisms"}
           </button>
         ))}
       </div>
       <div className="flex-1 min-h-0 overflow-auto">
-        {sidebarTab === "files" ? <FileExplorer /> : infoSidebarContent}
+        {sidebarTab === "files" ? (
+          <FileExplorer />
+        ) : sidebarTab === "mechanisms" ? (
+          <Suspense fallback={null}>
+            <MechanismsPanel />
+          </Suspense>
+        ) : (
+          infoSidebarContent
+        )}
       </div>
     </div>
   );
