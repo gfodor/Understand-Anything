@@ -64,10 +64,23 @@ function FlowNode({ data }: NodeProps<FlowFlowNode>) {
           <button
             type="button"
             onClick={onReadClick}
-            className="text-[9px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-accent text-white hover:bg-accent/90"
-            aria-label={`Read walkthrough: ${walkthrough.title}`}
+            className="inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-accent text-white hover:bg-accent/90"
+            aria-label={`Open walkthrough: ${walkthrough.title}`}
           >
-            Read →
+            <svg
+              className="w-3 h-3"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <line x1="20" y1="20" x2="16.5" y2="16.5" />
+            </svg>
+            Walkthrough
           </button>
         )}
       </div>

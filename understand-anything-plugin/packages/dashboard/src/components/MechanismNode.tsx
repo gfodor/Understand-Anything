@@ -82,11 +82,24 @@ function MechanismNode({ data }: NodeProps<MechanismFlowNode>) {
           <button
             type="button"
             onClick={onReadClick}
-            className="text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-md text-white hover:opacity-90 transition-opacity"
+            className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-md text-white hover:opacity-90 transition-opacity"
             style={{ background: palette.text }}
-            aria-label={`Read walkthrough: ${mechanism.walkthrough.title}`}
+            aria-label={`Open walkthrough: ${mechanism.walkthrough.title}`}
           >
-            Read →
+            <svg
+              className="w-3 h-3"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <line x1="20" y1="20" x2="16.5" y2="16.5" />
+            </svg>
+            Walkthrough
           </button>
         ) : (
           <span className="text-[9px] text-text-muted italic">
