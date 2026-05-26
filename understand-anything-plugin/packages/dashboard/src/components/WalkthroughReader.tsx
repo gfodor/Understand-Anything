@@ -306,6 +306,25 @@ function Opening({ walkthrough }: { walkthrough: Walkthrough }) {
   );
 }
 
+// Right-pane content: either a code excerpt OR a focal diagram. Per the
+// form's discipline (prose left, visuals right), focal diagrams live in
+// this pane alongside code excerpts — not inline with the prose. Beats
+// stay inline because they're narrative-interaction, not visualization.
+type RightPaneItem =
+  | { kind: "code"; key: string; excerpt: NonNullable<WalkthroughScene["codeExcerpt"]> }
+  | { kind: "focal"; key: string; focal: FocalPlaceholder };
+
+function focalEmbedOf(scene: WalkthroughScene): FocalPlaceholder | null {
+  return scene.embed && scene.embed.kind === "focal" ? scene.embed : null;
+}
+
+function hashString(s: string): string {
+  // Lightweight hash for dedup keys — not cryptographic, just stable.
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return Math.abs(h).toString(36);
+}
+
 function ScenesWithStickyCode({
   walkthrough,
   scrollContainer,
@@ -313,46 +332,75 @@ function ScenesWithStickyCode({
   walkthrough: Walkthrough;
   scrollContainer: React.MutableRefObject<HTMLDivElement | null>;
 }) {
-  const excerptKey = (e: NonNullable<WalkthroughScene["codeExcerpt"]>) =>
-    `${e.path}::${e.lineRange[0]}-${e.lineRange[1]}`;
+  const codeKey = (e: NonNullable<WalkthroughScene["codeExcerpt"]>) =>
+    `code::${e.path}::${e.lineRange[0]}-${e.lineRange[1]}${
+      e.outlineRanges
+        ? "::o" + e.outlineRanges.map((r) => `${r[0]}-${r[1]}`).join(",")
+        : ""
+    }`;
+  const focalKey = (f: FocalPlaceholder) =>
+    `focal::${f.template}::${hashString(f.parameters?.source ?? f.description ?? "")}`;
 
-  const uniqueExcerpts = useMemo(() => {
-    const seen = new Map<string, NonNullable<WalkthroughScene["codeExcerpt"]>>();
+  // Unique right-pane items across all scenes. Each scene contributes its
+  // focal embed (if any) — focal wins over code excerpt when both are
+  // present on the same scene, because the focal is the more specific
+  // authorial choice for the visual side of the page. If the author
+  // wanted code, they wouldn't have attached a focal here.
+  const uniqueItems = useMemo<RightPaneItem[]>(() => {
+    const seen = new Map<string, RightPaneItem>();
     for (const scene of walkthrough.scenes) {
-      if (!scene.codeExcerpt) continue;
-      const k = excerptKey(scene.codeExcerpt);
-      if (!seen.has(k)) seen.set(k, scene.codeExcerpt);
+      const focal = focalEmbedOf(scene);
+      if (focal) {
+        const k = focalKey(focal);
+        if (!seen.has(k)) seen.set(k, { kind: "focal", key: k, focal });
+      } else if (scene.codeExcerpt) {
+        const k = codeKey(scene.codeExcerpt);
+        if (!seen.has(k)) seen.set(k, { kind: "code", key: k, excerpt: scene.codeExcerpt });
+      }
     }
-    return Array.from(seen.entries()).map(([k, excerpt]) => ({ key: k, excerpt }));
+    return Array.from(seen.values());
   }, [walkthrough]);
 
-  const sceneToExcerptKey = useMemo(() => {
+  // sceneId → item key. Same focal-wins-over-code rule.
+  const sceneToItemKey = useMemo(() => {
     const m = new Map<string, string>();
     for (const scene of walkthrough.scenes) {
-      if (scene.codeExcerpt) m.set(scene.id, excerptKey(scene.codeExcerpt));
+      const focal = focalEmbedOf(scene);
+      if (focal) {
+        m.set(scene.id, focalKey(focal));
+      } else if (scene.codeExcerpt) {
+        m.set(scene.id, codeKey(scene.codeExcerpt));
+      }
     }
     return m;
   }, [walkthrough]);
 
-  const resolveExcerptForScene = useCallback(
+  const resolveItemForScene = useCallback(
     (sceneId: string | null): string | null => {
       if (!sceneId) return null;
-      const direct = sceneToExcerptKey.get(sceneId);
+      const direct = sceneToItemKey.get(sceneId);
       if (direct) return direct;
+      // Fall back to the most recent preceding scene's right-pane item.
       const scenes = walkthrough.scenes;
       const idx = scenes.findIndex((s) => s.id === sceneId);
       for (let i = idx - 1; i >= 0; i--) {
-        const k = sceneToExcerptKey.get(scenes[i].id);
+        const k = sceneToItemKey.get(scenes[i].id);
         if (k) return k;
       }
-      return uniqueExcerpts[0]?.key ?? null;
+      return uniqueItems[0]?.key ?? null;
     },
-    [sceneToExcerptKey, walkthrough.scenes, uniqueExcerpts]
+    [sceneToItemKey, walkthrough.scenes, uniqueItems]
   );
 
   const [files, setFiles] = useState<Record<string, FetchState>>({});
   useEffect(() => {
-    const paths = Array.from(new Set(uniqueExcerpts.map((e) => e.excerpt.path)));
+    const paths = Array.from(
+      new Set(
+        uniqueItems
+          .filter((item): item is Extract<RightPaneItem, { kind: "code" }> => item.kind === "code")
+          .map((item) => item.excerpt.path),
+      ),
+    );
     let cancelled = false;
     for (const p of paths) {
       if (files[p]) continue;
@@ -394,7 +442,7 @@ function ScenesWithStickyCode({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uniqueExcerpts]);
+  }, [uniqueItems]);
 
   const sceneRefs = useRef<Map<string, HTMLElement | null>>(new Map());
   const [scrollSceneId, setScrollSceneId] = useState<string | null>(
@@ -403,7 +451,7 @@ function ScenesWithStickyCode({
   const [hoverSceneId, setHoverSceneId] = useState<string | null>(null);
   const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
   const activeSceneId = hoverSceneId ?? scrollSceneId;
-  const activeExcerptKey = resolveExcerptForScene(activeSceneId);
+  const activeItemKey = resolveItemForScene(activeSceneId);
 
   const observeScene = useCallback((id: string, el: HTMLElement | null) => {
     if (el) sceneRefs.current.set(id, el);
@@ -445,7 +493,7 @@ function ScenesWithStickyCode({
       style={{
         display: "grid",
         gridTemplateColumns:
-          uniqueExcerpts.length > 0 ? "minmax(0, 1fr) minmax(0, 1.3fr)" : "1fr",
+          uniqueItems.length > 0 ? "minmax(0, 1fr) minmax(0, 1.3fr)" : "1fr",
         columnGap: "44px",
         padding: "20px 56px 20px",
       }}
@@ -467,10 +515,10 @@ function ScenesWithStickyCode({
           />
         ))}
       </div>
-      {uniqueExcerpts.length > 0 && (
-        <StickyCodePane
-          excerpts={uniqueExcerpts}
-          activeExcerptKey={activeExcerptKey}
+      {uniqueItems.length > 0 && (
+        <StickyRightPane
+          items={uniqueItems}
+          activeItemKey={activeItemKey}
           files={files}
           hoveredSymbol={hoveredSymbol}
         />
@@ -608,14 +656,14 @@ function SceneProse({
   );
 }
 
-function StickyCodePane({
-  excerpts,
-  activeExcerptKey,
+function StickyRightPane({
+  items,
+  activeItemKey,
   files,
   hoveredSymbol,
 }: {
-  excerpts: { key: string; excerpt: NonNullable<WalkthroughScene["codeExcerpt"]> }[];
-  activeExcerptKey: string | null;
+  items: RightPaneItem[];
+  activeItemKey: string | null;
   files: Record<string, FetchState>;
   hoveredSymbol: string | null;
 }) {
@@ -634,21 +682,121 @@ function StickyCodePane({
           boxShadow: "inset 0 0 0 1px rgba(212, 165, 116, 0.02)",
         }}
       >
-        {excerpts.map(({ key, excerpt }) => {
-          const fileState = files[excerpt.path];
-          const isActive = key === activeExcerptKey;
+        {items.map((item) => {
+          const isActive = item.key === activeItemKey;
+          if (item.kind === "code") {
+            const fileState = files[item.excerpt.path];
+            return (
+              <ExcerptStack
+                key={item.key}
+                excerpt={item.excerpt}
+                fileState={fileState}
+                isActive={isActive}
+                hoveredSymbol={hoveredSymbol}
+              />
+            );
+          }
           return (
-            <ExcerptStack
-              key={key}
-              excerpt={excerpt}
-              fileState={fileState}
+            <FocalStack
+              key={item.key}
+              focal={item.focal}
               isActive={isActive}
-              hoveredSymbol={hoveredSymbol}
             />
           );
         })}
       </div>
     </aside>
+  );
+}
+
+function FocalStack({
+  focal,
+  isActive,
+}: {
+  focal: FocalPlaceholder;
+  isActive: boolean;
+}) {
+  // Only Mermaid-backed templates render. The other templates declared
+  // in the schema (data-structure, metric-strip) and simulations are
+  // intentionally skipped — no placeholder, just nothing.
+  const isMermaid = MERMAID_TEMPLATES.includes(focal.template);
+  const source = focal.parameters?.source;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        opacity: isActive ? 1 : 0,
+        transform: isActive ? "translateY(0)" : "translateY(10px)",
+        transition:
+          "opacity 600ms cubic-bezier(0.16, 1, 0.3, 1), transform 600ms cubic-bezier(0.16, 1, 0.3, 1)",
+        pointerEvents: isActive ? "auto" : "none",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "12px 18px",
+          borderBottom: "1px solid var(--color-border-subtle)",
+          background: "var(--color-elevated)",
+          fontFamily: "var(--font-mono)",
+          fontSize: "0.7rem",
+          letterSpacing: "0.04em",
+          color: "var(--color-text-muted)",
+          flexShrink: 0,
+        }}
+      >
+        <span style={{ color: "var(--color-text-secondary)" }}>
+          Diagram · {focal.template}
+        </span>
+      </div>
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: "auto",
+          padding: "20px 24px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "16px",
+        }}
+      >
+        {focal.description && (
+          <p
+            style={{
+              margin: 0,
+              fontStyle: "italic",
+              color: "var(--color-text-secondary)",
+              fontSize: "0.9rem",
+              lineHeight: 1.5,
+            }}
+          >
+            {focal.description}
+          </p>
+        )}
+        {isMermaid && source ? (
+          <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <MermaidDiagram source={source} />
+          </div>
+        ) : (
+          <div
+            style={{
+              padding: "20px",
+              fontFamily: "var(--font-mono)",
+              fontSize: "0.78rem",
+              color: "var(--color-text-muted)",
+              textAlign: "center",
+            }}
+          >
+            (diagram template <code>{focal.template}</code> not supported in v1)
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -926,11 +1074,13 @@ function SymbolMark({
 }
 
 function EmbedCard({ embed }: { embed: WalkthroughScene["embed"] }) {
+  // Per the form's discipline: prose on the left, visuals (code +
+  // focal diagrams + sims) on the right. Beats stay inline here
+  // because they're narrative-interaction (forced retrieval), not
+  // visualization. Focal embeds are picked up by the right-pane
+  // resolver and rendered there. Simulations are out of scope in v1.
   if (!embed) return null;
   if (embed.kind === "beat") return <BeatCard beat={embed} />;
-  if (embed.kind === "focal") return <FocalCard focal={embed} />;
-  // Simulations are out of scope for v1. The schema still accepts
-  // them; the renderer just skips them silently.
   return null;
 }
 
@@ -1281,33 +1431,6 @@ const MERMAID_TEMPLATES: ReadonlyArray<FocalPlaceholder["template"]> = [
   "state-diagram",
   "system-diagram",
 ];
-
-function FocalCard({ focal }: { focal: FocalPlaceholder }) {
-  if (!MERMAID_TEMPLATES.includes(focal.template)) return null;
-  // Convention: agent emits mermaid source under parameters.source.
-  // No source → don't render the card at all. The walkthrough author
-  // prompt enforces this; this is the defensive renderer-side check.
-  const source = focal.parameters?.source;
-  if (!source) return null;
-
-  return (
-    <CardShell label={`Diagram · ${focal.template}`}>
-      {focal.description && (
-        <p
-          style={{
-            margin: "0 0 10px",
-            fontStyle: "italic",
-            color: "var(--color-text-secondary)",
-            fontSize: "0.9rem",
-          }}
-        >
-          {focal.description}
-        </p>
-      )}
-      <MermaidDiagram source={source} />
-    </CardShell>
-  );
-}
 
 function Coda({ walkthrough }: { walkthrough: Walkthrough }) {
   return (

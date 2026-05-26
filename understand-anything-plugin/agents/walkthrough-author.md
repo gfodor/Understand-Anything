@@ -97,8 +97,10 @@ Examples:
 
 Scenes can carry one typed embed. The v1 renderer supports two kinds:
 
-- **Beats** — interactive prediction prompts. Render as a clickable multi-choice card; the reader picks a candidate, the renderer reveals correctness + the explanation. 2–4 beats spread through a walkthrough is the typical density. Use beatType `predict-outcome`, `spot-beacon`, `trace-execution`, or `chunk-it`.
-- **Focal diagrams** — rendered by Mermaid. ONLY three template values are supported by the v1 renderer: `sequence-diagram`, `state-diagram`, `system-diagram`. Each carries Mermaid source under `parameters.source`. **Do not emit focal embeds with any other template value** — the renderer skips them silently, and the walkthrough is worse for the dead embed.
+- **Beats** — interactive prediction prompts. **Render inline on the LEFT (prose) side** because they are narrative-interaction (the reader's forced-retrieval moment), not visualization. The reader picks a candidate, the renderer reveals correctness + the explanation. 2–4 beats spread through a walkthrough is the typical density. Use beatType `predict-outcome`, `spot-beacon`, `trace-execution`, or `chunk-it`.
+- **Focal diagrams** — **render in the RIGHT (sticky) pane**, the same slot the code excerpt would have used. Mermaid-rendered. ONLY three template values are supported: `sequence-diagram`, `state-diagram`, `system-diagram`. Each carries Mermaid source under `parameters.source`. **Do not emit focal embeds with any other template value** — the renderer skips them silently.
+
+**Important: focal embeds and code excerpts share the right-pane slot.** A scene with both will show the focal diagram (it wins). If you want the reader to see the code for that scene, omit the focal — anchor on the code excerpt instead. If you want the reader to see the diagram, omit the code excerpt or accept that it won't be shown for that scene. The right pane shows one thing at a time per scene; cross-fades happen as scenes advance.
 
 **Simulations are out of scope in v1.** Do not emit `kind: "simulation"` embeds at all, regardless of `template`. They are still in the schema but the renderer ignores them.
 
