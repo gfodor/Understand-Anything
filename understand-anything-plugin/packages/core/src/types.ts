@@ -33,6 +33,11 @@ export interface DomainMeta {
   crossDomainInteractions?: string[];
   entryPoint?: string;
   entryType?: "http" | "cli" | "event" | "cron" | "manual";
+  /** Flow nodes only: one sentence answering "why does this flow matter to
+   *  the user?" — a motivation that contextualizes the walkthrough. The
+   *  domain-analyzer treats flows without a motivation as quality-filtered
+   *  out (probably just plumbing). */
+  motivation?: string;
 }
 
 // GraphNode with 21 types: 5 code + 8 non-code + 3 domain + 5 knowledge
@@ -106,6 +111,7 @@ export interface Mechanism {
   id: string;                          // "mechanism:<kebab-name>"
   name: string;                        // human-readable, e.g. "The Split Key"
   kind: MechanismKind;
+  motivation: string;                  // one sentence: why a reader should care
   premise: string;                     // one paragraph: what's the problem
   candidateRecognition: string;        // one sentence: what's the answer
   participantNodeIds: string[];        // 5-25 source locations
@@ -113,6 +119,37 @@ export interface Mechanism {
   worthWalkthrough: boolean;           // agent's judgment
   walkthrough?: Walkthrough;           // populated opt-in
   tags?: string[];
+}
+
+// =========================================================================
+// Structures (peer to Mechanisms; structural walkthroughs)
+// -------------------------------------------------------------------------
+// A Structure captures a motivated structural response in the code — a
+// constraint, feature requirement, or non-functional property that
+// organizes multiple structural choices. Discovery surfaces candidate
+// (motivation, structural-responses) pairs; walkthroughs explain how
+// the structure answers the motivation.
+// =========================================================================
+
+export interface Structure {
+  id: string;                          // "structure:<kebab-name>"
+  name: string;                        // short title
+  motivation: string;                  // the driving constraint/requirement/property
+  participantNodeIds: string[];        // 5-25 structural elements involved
+  /** Optional pointer at the central structural element (a class, file, or
+   *  module) that anchors the structure — analogous to climacticNodeId for
+   *  mechanisms but less load-bearing. Walkthroughs may open from here. */
+  anchorNodeId?: string;
+  worthWalkthrough: boolean;
+  walkthrough?: Walkthrough;
+  tags?: string[];
+}
+
+export interface StructureGraph {
+  version: string;
+  project: ProjectMeta;
+  structures: Structure[];
+  generatedAt: string;
 }
 
 export interface ReviewPrompt {
@@ -166,6 +203,13 @@ export interface WalkthroughScene {
   codeExcerpt?: {
     path: string;
     lineRange: [number, number];
+    /** Optional multi-range elision. When present, the renderer shows
+     *  ONLY these line ranges from the source, joined with `// ...`
+     *  separators. Used for structural walkthroughs that want to show
+     *  e.g. a class header + a few key method signatures from one file
+     *  without their bodies. ranges are inclusive, 1-indexed, sorted
+     *  ascending and non-overlapping. */
+    outlineRanges?: Array<[number, number]>;
     highlightLine?: number;
     language?: string;
   };
@@ -175,13 +219,17 @@ export interface WalkthroughScene {
 
 export interface Walkthrough {
   version: "1";
-  attachedTo: { kind: "flow" | "mechanism"; id: string };
-  shape: "process" | "recognition";
+  attachedTo: { kind: "flow" | "mechanism" | "structure"; id: string };
+  shape: "process" | "recognition" | "structural";
+  /** Universal one-sentence "why read this" header, displayed prominently
+   *  above the title. Lifted from the underlying artifact's motivation by
+   *  default; the walkthrough author may sharpen during generation. */
+  motivation: string;
   title: string;
   subtitle: string;                    // masthead tension subtitle
   opening: WalkthroughOpening;
   scenes: WalkthroughScene[];
-  pullQuote?: string;                  // climax sentence (recognition) or punchline (process)
+  pullQuote?: string;                  // climax sentence (recognition) or punchline (process/structural)
   coda: WalkthroughCoda;
   generatedAt: string;                 // ISO timestamp
 }
@@ -219,6 +267,9 @@ export interface KnowledgeGraph {
    *  in mechanism-graph.json. When present here, the dashboard reads from
    *  the same JSON it already fetches. */
   mechanisms?: Mechanism[];
+  /** Optional. Populated by /understand-structures or written separately
+   *  in structure-graph.json. */
+  structures?: Structure[];
 }
 
 // Theme configuration (for dashboard customization)

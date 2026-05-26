@@ -5,6 +5,8 @@ export {
   MechanismGraphSchema,
   MechanismSchema,
   MechanismKindSchema,
+  StructureGraphSchema,
+  StructureSchema,
   WalkthroughSchema,
   WalkthroughSceneSchema,
   WalkthroughEmbedSchema,

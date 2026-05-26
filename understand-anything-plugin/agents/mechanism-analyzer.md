@@ -92,6 +92,7 @@ Write `mechanism-graph.json` to the path given by the orchestrator. Schema:
       "id": "mechanism:<kebab-name>",
       "name": "<short human-readable name, like a vignette title>",
       "kind": "algorithmic | architectural | architectural-elision | protocol | data-structure",
+      "motivation": "<one sentence: why someone reading this codebase should care about this mechanism — contextualizes the walkthrough one level above the engineering premise>",
       "premise": "<one paragraph: what's the problem this code solves, and what's structurally hard about it>",
       "candidateRecognition": "<one sentence: what an expert sees that a novice would miss>",
       "participantNodeIds": ["<id>", "<id>", "..."],
@@ -102,6 +103,14 @@ Write `mechanism-graph.json` to the path given by the orchestrator. Schema:
   ]
 }
 ```
+
+The `motivation` field is the contextualization a reader sees before they decide whether to engage with the walkthrough at all. It sits one level above `premise` (which is the engineering hard-part) and is more about *why this is worth understanding* than *what makes it hard*. Often a single sharp sentence — sometimes a feature requirement, sometimes a technical pressure, sometimes a property the code is protecting.
+
+- Good motivation: *"The single-threaded server's largest source of P99 latency would naturally be hash-table rehashing — except it isn't, because of this."*
+- Good motivation: *"Every shipping Redis instance does this thousands of times a day; understanding it is the difference between operating Redis and tuning Redis."*
+- Bad motivation (it's the premise, not the motivation): *"Resizing a million-entry hash table takes tens of milliseconds, blocking the single-threaded server."*
+
+If you cannot write a concrete one-sentence motivation, that's a signal the mechanism may not be worth surfacing — drop it.
 
 ### Discipline
 

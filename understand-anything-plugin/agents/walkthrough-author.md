@@ -41,8 +41,9 @@ Write the full `Walkthrough` JSON document to the path given by the orchestrator
 ```json
 {
   "version": "1",
-  "attachedTo": { "kind": "flow" | "mechanism", "id": "<artifact-id>" },
-  "shape": "process" | "recognition",
+  "attachedTo": { "kind": "flow" | "mechanism" | "structure", "id": "<artifact-id>" },
+  "shape": "process" | "recognition" | "structural",
+  "motivation": "<one sentence: the contextualizing 'why read this' header>",
   "title": "<short, evocative, like a vignette title>",
   "subtitle": "<one-sentence masthead subtitle naming the tension (do not reveal the climax)>",
   "opening": {
@@ -58,6 +59,7 @@ Write the full `Walkthrough` JSON document to the path given by the orchestrator
       "codeExcerpt": {
         "path": "<filePath>",
         "lineRange": [<start>, <end>],
+        "outlineRanges": [[<s1>, <e1>], [<s2>, <e2>], ...],  /* optional, structural-shape only */
         "highlightLine": <optional, the climactic line>,
         "language": "<optional language hint for syntax highlighting>"
       },
@@ -66,9 +68,9 @@ Write the full `Walkthrough` JSON document to the path given by the orchestrator
     }
     /* 10-15 scenes */
   ],
-  "pullQuote": "<for recognition: the one climactic sentence (~12-20 words); for process: the punchline>",
+  "pullQuote": "<for recognition: the one climactic sentence (~12-20 words); for process or structural: the punchline>",
   "coda": {
-    "summary": "<2-3 sentence summary that restates the recognition or punchline>",
+    "summary": "<2-3 sentence summary that restates the recognition, punchline, or structural gestalt>",
     "prompts": [
       { "type": "function-contract" | "counterfactual" | "pattern-recognition" | "throughline-retention" | "bit-layout" | "timing" | "beacon", "question": "<...>" }
       /* 4-6 prompts */
@@ -77,6 +79,19 @@ Write the full `Walkthrough` JSON document to the path given by the orchestrator
   "generatedAt": "<ISO timestamp>"
 }
 ```
+
+### The motivation field
+
+The walkthrough's `motivation` field is the universal "why read this" header. The dashboard renders it as a small accent line above the title, before the reader's eye reaches the opening prose.
+
+- Lift the motivation from the input artifact's own `motivation` field (`Mechanism.motivation`, `Flow.domainMeta.motivation`, or `Structure.motivation`) as the starting point.
+- If you discover a sharper angle during walkthrough generation — a tighter sentence that better captures *why someone should care* — write your own.
+- One sentence, 15–30 words. Not a description of what the walkthrough covers; the *why care*. The title says what; the motivation says why.
+
+Examples:
+- *"The single-threaded server's largest source of P99 latency would naturally be hash-table rehashing — except it isn't, because of this."* (mechanism)
+- *"Every captured frame in the offscreen window passes through this; understanding it is the difference between a working virtual camera and one that drops frames under load."* (flow)
+- *"macOS only sees cameras through CoreMediaIO DAL plugins — so the entire architecture of this codebase is shaped by what that plugin contract demands."* (structure)
 
 ### Embeds
 
@@ -154,7 +169,7 @@ Authoring guidance:
 - **Code excerpts are short and aggressive.** 10–40 lines per excerpt. Elide error handling, logging, telemetry when not load-bearing. Trust the reader.
 - **Coda is brief.** 2–3 sentences of summary; 4–6 prompts. Not a recap.
 
-### Two shape variants
+### Three shape variants
 
 **Shape: `"recognition"`** (mechanisms).
 - Mark the climactic scene `isClimax: true`.
@@ -167,6 +182,37 @@ Authoring guidance:
 - The `pullQuote` is a punchline — the resolution of the opening tension. *"And that is how an order moves through the system."* Often the last sentence of the last scene.
 - The coda's `summary` restates what was walked through.
 - Flow walkthroughs typically use 1–2 beats and 1 focal diagram. The simulation embed is rare in process shape — most business flows don't have a manipulable parameter that reveals something.
+
+**Shape: `"structural"`** (structures).
+
+The throughline is a **motivation** (a constraint, a feature requirement, a non-functional property) and the walkthrough retraces how the code's structure responds to it. The reader leaves with a mental map of how this region is organized *in service of* the motivation, not just a labeled diagram.
+
+Discipline that differs from `recognition` and `process`:
+
+- **No single climactic scene.** Structural walkthroughs build up the picture across multiple scenes; the gestalt comes at the end. `isClimax` is false or absent everywhere.
+- **The `pullQuote` is a synthesis sentence** at the end, not a recognition. *"Every piece of this architecture is doing exactly the work the CoreMediaIO contract demanded — no more, no less."* The synthesis names the relationship between the motivation and the structure.
+- **Scenes are organized by structural element, not by event.** Each scene introduces one or two classes/files/protocols and explains how they respond to the motivation. Code excerpts are typically *elided structural blobs*: class declarations, key method signatures, type definitions — not function bodies. Use `outlineRanges` to do this:
+
+  ```json
+  "codeExcerpt": {
+    "path": "src/plugins/mac/lofi-cam/src/dal-plugin/LOFIDALDevice.h",
+    "lineRange": [1, 70],
+    "outlineRanges": [[1, 12], [25, 28], [45, 52]],
+    "language": "objc"
+  }
+  ```
+
+  The renderer fetches the file and shows ONLY the listed ranges, joined with `// ...` separators. Use this to surface a class declaration + the few methods that matter for the structural story, leaving the bodies out.
+
+- **Diagrams are central.** Most scenes should have a focal diagram (Mermaid sequence/state/flowchart). The first scene's diagram is usually the topology overview; later scenes can be smaller — zoomed into one part — or the same diagram restated with different emphasis.
+- **Every structural claim must anchor at a specific line, signature, or diagram edge.** This is the form's deepest discipline — structural walkthroughs risk *Powerpoint-y prose*. If a sentence asserts a relationship, the very next sentence must cite the line that proves it. Treat unanchored sentences as failures.
+- **Honest evaluation allowed.** Structural walkthroughs may, and should, point out where the structure serves the motivation imperfectly. *"This works, but the Mach IPC bridge is doing a lot of work because the constraint forced separate-process plugins. A modern alternative would be XPC..."* — that's a legitimate scene.
+
+Two flavors of structural walkthrough, distinguished by motivation source (the agent decides which fits; no schema field):
+- **Feature-driven**: motivation is a product requirement. *"Lofi must appear as a webcam in any video conferencing app on macOS."*
+- **Property-driven**: motivation is a non-functional pressure. *"The camera plugin must not be able to crash the host app."*
+
+Both use the same scene shape. The difference is the opening — feature-driven opens with the requirement; property-driven opens with the pressure.
 
 ### Worked-example exemplars
 

@@ -8,6 +8,8 @@ import type {
   TourStep,
   Mechanism,
   MechanismGraph,
+  Structure,
+  StructureGraph,
   Walkthrough,
 } from "@understand-anything/core/types";
 import type { ReactFlowInstance } from "@xyflow/react";
@@ -17,7 +19,7 @@ export type NavigationLevel = "overview" | "layer-detail";
 export type NodeType = "file" | "function" | "class" | "module" | "concept" | "config" | "document" | "service" | "table" | "endpoint" | "pipeline" | "schema" | "resource" | "domain" | "flow" | "step" | "article" | "entity" | "topic" | "claim" | "source";
 export type Complexity = "simple" | "moderate" | "complex";
 export type EdgeCategory = "structural" | "behavioral" | "data-flow" | "dependencies" | "semantic" | "infrastructure" | "domain" | "knowledge";
-export type ViewMode = "structural" | "domain" | "knowledge" | "mechanisms";
+export type ViewMode = "structural" | "domain" | "knowledge" | "mechanisms" | "structures";
 export type DetailLevel = "file" | "class";
 
 export interface FilterState {
@@ -206,6 +208,10 @@ interface DashboardStore {
   // Mechanisms (peer to domain graph; sibling artifact mechanism-graph.json)
   mechanismGraph: MechanismGraph | null;
   setMechanismGraph: (graph: MechanismGraph | null) => void;
+
+  // Structures (peer to mechanism graph; sibling artifact structure-graph.json)
+  structureGraph: StructureGraph | null;
+  setStructureGraph: (graph: StructureGraph | null) => void;
 
   // Flow walkthroughs — sibling array on domain-graph.json, indexed by
   // the flow id they attach to. Looked up by FlowNode to render the
@@ -699,6 +705,9 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
 
   mechanismGraph: null,
   setMechanismGraph: (graph) => set({ mechanismGraph: graph }),
+
+  structureGraph: null,
+  setStructureGraph: (graph) => set({ structureGraph: graph }),
 
   flowWalkthroughs: [],
   setFlowWalkthroughs: (walkthroughs) => set({ flowWalkthroughs: walkthroughs }),

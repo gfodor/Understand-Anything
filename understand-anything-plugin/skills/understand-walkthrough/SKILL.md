@@ -13,7 +13,7 @@ Walkthroughs are distinct from the existing `tour[]` (which is a breadth-first s
 ## How It Works
 
 - Takes one artifact ID (e.g., `flow:create-order` or `mechanism:the-split-key`).
-- Looks the artifact up in `domain-graph.json` (flow) or `mechanism-graph.json` (mechanism).
+- Looks the artifact up in `domain-graph.json` (flow), `mechanism-graph.json` (mechanism), or `structure-graph.json` (structure).
 - Resolves the participating nodes from `knowledge-graph.json` and pulls actual source excerpts for the most important ones.
 - Dispatches the `walkthrough-author` agent with `shape: "recognition"` (mechanisms) or `shape: "process"` (flows). Optional `--shape=...` override.
 - Writes the generated walkthrough back into the artifact and reports.
@@ -29,8 +29,9 @@ Same boilerplate as `/understand-mechanisms` (worktree redirect, plugin-root can
 - The first argument is the artifact ID. Required.
   - If it starts with `flow:` — look up in `.understand-anything/domain-graph.json`.
   - If it starts with `mechanism:` — look up in `.understand-anything/mechanism-graph.json`.
-  - If it has no prefix, assume `flow:` first, then `mechanism:`.
-- Optional `--shape=recognition|process` flag overrides the default (`process` for flows, `recognition` for mechanisms).
+  - If it starts with `structure:` — look up in `.understand-anything/structure-graph.json`.
+  - If it has no prefix, try `flow:` first, then `mechanism:`, then `structure:`.
+- Optional `--shape=recognition|process|structural` flag overrides the default (`process` for flows, `recognition` for mechanisms, `structural` for structures).
 
 ```bash
 ARTIFACT_ID="$1"
@@ -106,8 +107,9 @@ The agent writes its output to `$PROJECT_ROOT/.understand-anything/intermediate/
 2. Validate against `WalkthroughSchema` from `@understand-anything/core`. Drop on schema failure with a clear error message — the user can rerun and the agent will produce something different.
 3. Cross-check that every `anchorNodeId` in scenes references a real node in the knowledge graph (drop the `anchorNodeId` field but keep the scene if it doesn't).
 4. Write the walkthrough back into the artifact:
-   - **Flow**: update `domain-graph.json`, setting `walkthrough` on the matching flow node (or on a sibling structure — see the existing domain-graph layout; the dashboard reads from the same JSON regardless).
+   - **Flow**: update `domain-graph.json`, setting `walkthrough` in the sibling `walkthroughs[]` array keyed by `attachedTo.id`.
    - **Mechanism**: update `mechanism-graph.json`, setting `walkthrough` on the matching mechanism record.
+   - **Structure**: update `structure-graph.json`, setting `walkthrough` on the matching structure record.
 5. Clean up `intermediate/walkthrough-context.json` and `intermediate/walkthrough.json`.
 
 Validation script:
@@ -133,9 +135,13 @@ const walkthrough = result.data;
 
 // Attach back to the artifact
 const isFlow = artifactId.startsWith('flow:');
+const isMechanism = artifactId.startsWith('mechanism:');
+const isStructure = artifactId.startsWith('structure:');
 const targetPath = isFlow
   ? join(projectRoot, '.understand-anything', 'domain-graph.json')
-  : join(projectRoot, '.understand-anything', 'mechanism-graph.json');
+  : isMechanism
+  ? join(projectRoot, '.understand-anything', 'mechanism-graph.json')
+  : join(projectRoot, '.understand-anything', 'structure-graph.json');
 
 const target = JSON.parse(readFileSync(targetPath, 'utf-8'));
 let written = false;
@@ -148,11 +154,18 @@ if (isFlow) {
   if (i >= 0) target.walkthroughs[i] = walkthrough;
   else target.walkthroughs.push(walkthrough);
   written = true;
-} else {
+} else if (isMechanism) {
   // For mechanisms the walkthrough is a field on the mechanism record itself.
   const idx = target.mechanisms.findIndex((m) => m.id === artifactId);
   if (idx >= 0) {
     target.mechanisms[idx].walkthrough = walkthrough;
+    written = true;
+  }
+} else if (isStructure) {
+  // Same shape as mechanisms — walkthrough field on the structure record.
+  const idx = target.structures.findIndex((s) => s.id === artifactId);
+  if (idx >= 0) {
+    target.structures[idx].walkthrough = walkthrough;
     written = true;
   }
 }

@@ -251,6 +251,7 @@ export default defineConfig({
             pathname === "/knowledge-graph.json" ||
             pathname === "/domain-graph.json" ||
             pathname === "/mechanism-graph.json" ||
+            pathname === "/structure-graph.json" ||
             pathname === "/diff-overlay.json" ||
             pathname === "/meta.json" ||
             pathname === "/config.json" ||
@@ -301,6 +302,8 @@ export default defineConfig({
               ? "domain-graph.json"
               : pathname === "/mechanism-graph.json"
               ? "mechanism-graph.json"
+              : pathname === "/structure-graph.json"
+              ? "structure-graph.json"
               : "knowledge-graph.json";
 
           const candidates = graphFileCandidates(fileName);

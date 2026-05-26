@@ -214,6 +214,11 @@ function CloseButton({ onClose }: { onClose: () => void }) {
 }
 
 function Masthead({ walkthrough }: { walkthrough: Walkthrough }) {
+  // The motivation is the universal "why read this" line — appears before
+  // the title in muted accent so the reader's eye picks it up first. Older
+  // walkthrough JSON predating the motivation field will have undefined here;
+  // skip the banner in that case rather than render a blank slot.
+  const motivation = walkthrough.motivation;
   return (
     <header
       style={{
@@ -223,6 +228,24 @@ function Masthead({ walkthrough }: { walkthrough: Walkthrough }) {
         position: "relative",
       }}
     >
+      {motivation && (
+        <p
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "0.78rem",
+            lineHeight: 1.55,
+            letterSpacing: "0.015em",
+            color: "var(--color-accent-dim)",
+            margin: "0 0 22px",
+            maxWidth: "42rem",
+            // Subtle left rule in tan to signal "context, not chrome"
+            borderLeft: "2px solid var(--color-accent)",
+            paddingLeft: "14px",
+          }}
+        >
+          {motivation}
+        </p>
+      )}
       <h1
         style={{
           fontFamily: "var(--font-heading)",
@@ -720,12 +743,52 @@ function CodeContent({
     );
   }
   const { lines, language } = fileState.file;
+  // Build the displayed slice. Two modes:
+  //
+  // 1. Plain range (default): show lines[start..end] verbatim.
+  // 2. Outline mode (structural walkthroughs): show ONLY the line ranges
+  //    listed in excerpt.outlineRanges, joined with `// ...` elision
+  //    markers. Used to surface a class header + key method signatures
+  //    from one file without their bodies.
+  //
+  // In outline mode we keep a parallel `displayLineNumbers` array so the
+  // gutter prints the real line numbers from the source, not 1..N of the
+  // sliced content.
   const [start, end] = excerpt.lineRange;
   const clampStart = Math.max(1, Math.min(start, lines.length));
   const clampEnd = Math.max(clampStart, Math.min(end, lines.length));
-  const slice = lines.slice(clampStart - 1, clampEnd);
+
+  const useOutline =
+    Array.isArray(excerpt.outlineRanges) && excerpt.outlineRanges.length > 0;
+  const sliceLines: string[] = [];
+  const displayLineNumbers: (number | null)[] = []; // null = elision marker
+  if (useOutline) {
+    const ranges = (excerpt.outlineRanges as Array<[number, number]>)
+      .map(([s, e]) => [
+        Math.max(1, Math.min(s, lines.length)),
+        Math.max(1, Math.min(e, lines.length)),
+      ] as [number, number])
+      .filter(([s, e]) => s <= e)
+      .sort((a, b) => a[0] - b[0]);
+    for (let i = 0; i < ranges.length; i++) {
+      const [s, e] = ranges[i];
+      if (i > 0) {
+        sliceLines.push("    // ...");
+        displayLineNumbers.push(null);
+      }
+      for (let ln = s; ln <= e; ln++) {
+        sliceLines.push(lines[ln - 1] ?? "");
+        displayLineNumbers.push(ln);
+      }
+    }
+  } else {
+    for (let ln = clampStart; ln <= clampEnd; ln++) {
+      sliceLines.push(lines[ln - 1] ?? "");
+      displayLineNumbers.push(ln);
+    }
+  }
+  const slice = sliceLines;
   const code = slice.join("\n");
-  const startLineForDisplay = clampStart;
   const highlightLine = excerpt.highlightLine;
 
   return (
@@ -749,11 +812,15 @@ function CodeContent({
           }}
         >
           {tokens.map((line, i) => {
-            const absLine = startLineForDisplay + i;
+            const absLine = displayLineNumbers[i]; // null for elision rows
+            const isElision = absLine === null;
             const isAuthoredHighlight =
-              highlightLine !== undefined && absLine === highlightLine;
+              !isElision &&
+              highlightLine !== undefined &&
+              absLine === highlightLine;
             const rawLineText = slice[i] ?? "";
             const isSymbolHighlight =
+              !isElision &&
               hoveredSymbol !== null &&
               hoveredSymbol.length > 0 &&
               new RegExp(
@@ -779,6 +846,7 @@ function CodeContent({
                   paddingLeft: "10px",
                   marginLeft: "-10px",
                   transition: "background-color 180ms ease",
+                  opacity: isElision ? 0.45 : 1,
                 }}
               >
                 <span
@@ -792,7 +860,7 @@ function CodeContent({
                     opacity: 0.5,
                   }}
                 >
-                  {absLine}
+                  {isElision ? "" : absLine}
                 </span>
                 <span style={{ minWidth: 0, flex: 1 }}>
                   {line.map((token, key) => (

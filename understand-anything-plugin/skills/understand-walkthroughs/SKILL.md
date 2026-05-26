@@ -1,7 +1,7 @@
 ---
 name: understand-walkthroughs
 description: Batch-generate walkthroughs for every qualifying mechanism and/or flow in one run. Convenience over /understand-walkthrough <id>. Default heuristics skip artifacts that don't deserve a deep read.
-argument-hint: [--mechanisms] [--flows] [--all]
+argument-hint: [--mechanisms] [--flows] [--structures] [--all]
 ---
 
 # /understand-walkthroughs
@@ -21,11 +21,17 @@ Without flags, the skill applies these heuristics so you don't burn LLM cycles o
 - the flow has at least 3 steps (`flow_step` outgoing edges), AND
 - no walkthrough is already attached for this flow in `domain-graph.json`'s `walkthroughs[]` sibling array.
 
+**Structures** — generate only when:
+- `worthWalkthrough: true` in the structure graph, AND
+- no `walkthrough` field is already attached.
+
 ## Flags
 
-- `--mechanisms` — restrict to mechanisms; skip flows.
-- `--flows` — restrict to flows; skip mechanisms.
-- `--all` — drop the default heuristics; generate for every mechanism and every flow, even those marked `worthWalkthrough: false` or with `entryType: manual`. Use sparingly — this can be expensive.
+- `--mechanisms` — restrict to mechanisms only.
+- `--flows` — restrict to flows only.
+- `--structures` — restrict to structures only.
+- Multiple kind flags compose (`--mechanisms --structures` does both, skips flows).
+- `--all` — drop the default heuristics; generate for every mechanism, flow, and structure, even those marked `worthWalkthrough: false` or with `entryType: manual`. Use sparingly.
 
 The flags compose: `--flows --all` generates a walkthrough for every flow regardless of heuristics; `--mechanisms` (alone) keeps the worthWalkthrough filter.
 
@@ -38,17 +44,28 @@ Use the same boilerplate as `/understand-mechanisms` and `/understand-walkthroug
 ### Phase 1: Parse flags
 
 ```bash
-TARGET_MECHANISMS=1
-TARGET_FLOWS=1
+# Default = all three kinds. Specifying any subset of --mechanisms /
+# --flows / --structures restricts to that subset.
+EXPLICIT_KINDS=0
+TARGET_MECHANISMS=0
+TARGET_FLOWS=0
+TARGET_STRUCTURES=0
 APPLY_HEURISTICS=1
 
 for arg in "$@"; do
   case "$arg" in
-    --mechanisms) TARGET_FLOWS=0 ;;
-    --flows) TARGET_MECHANISMS=0 ;;
-    --all) APPLY_HEURISTICS=0 ;;
+    --mechanisms) EXPLICIT_KINDS=1; TARGET_MECHANISMS=1 ;;
+    --flows)      EXPLICIT_KINDS=1; TARGET_FLOWS=1 ;;
+    --structures) EXPLICIT_KINDS=1; TARGET_STRUCTURES=1 ;;
+    --all)        APPLY_HEURISTICS=0 ;;
   esac
 done
+
+if [ "$EXPLICIT_KINDS" -eq 0 ]; then
+  TARGET_MECHANISMS=1
+  TARGET_FLOWS=1
+  TARGET_STRUCTURES=1
+fi
 ```
 
 ### Phase 2: Collect targets
@@ -63,14 +80,17 @@ import { join } from 'node:path';
 const projectRoot = process.argv[2];
 const targetMechanisms = process.argv[3] === '1';
 const targetFlows = process.argv[4] === '1';
-const applyHeuristics = process.argv[5] === '1';
+const targetStructures = process.argv[5] === '1';
+const applyHeuristics = process.argv[6] === '1';
 
 const mechPath = join(projectRoot, '.understand-anything', 'mechanism-graph.json');
 const domainPath = join(projectRoot, '.understand-anything', 'domain-graph.json');
+const structPath = join(projectRoot, '.understand-anything', 'structure-graph.json');
 
 const targets = [];
 let skippedMechanisms = 0;
 let skippedFlows = 0;
+let skippedStructures = 0;
 
 if (targetMechanisms && existsSync(mechPath)) {
   const mg = JSON.parse(readFileSync(mechPath, 'utf-8'));
@@ -101,20 +121,34 @@ if (targetFlows && existsSync(domainPath)) {
   }
 }
 
+if (targetStructures && existsSync(structPath)) {
+  const sg = JSON.parse(readFileSync(structPath, 'utf-8'));
+  for (const s of sg.structures || []) {
+    if (s.walkthrough) { skippedStructures++; continue; }
+    if (applyHeuristics && !s.worthWalkthrough) { skippedStructures++; continue; }
+    targets.push({ kind: 'structure', id: s.id, name: s.name, shape: 'structural' });
+  }
+}
+
 mkdirSync(join(projectRoot, '.understand-anything', 'intermediate'), { recursive: true });
 writeFileSync(
   join(projectRoot, '.understand-anything', 'intermediate', 'walkthrough-targets.json'),
-  JSON.stringify({ targets, skipped: { mechanisms: skippedMechanisms, flows: skippedFlows } }, null, 2),
+  JSON.stringify({
+    targets,
+    skipped: { mechanisms: skippedMechanisms, flows: skippedFlows, structures: skippedStructures },
+  }, null, 2),
 );
 
 console.log('Targets:', targets.length);
 console.log('  mechanisms:', targets.filter(t => t.kind === 'mechanism').length);
 console.log('  flows:     ', targets.filter(t => t.kind === 'flow').length);
+console.log('  structures:', targets.filter(t => t.kind === 'structure').length);
 console.log('Skipped:');
-console.log('  mechanisms:', skippedMechanisms, '(already-attached or worthWalkthrough=false)');
-console.log('  flows:     ', skippedFlows, '(already-attached, manual entryType, or <3 steps)');
+console.log('  mechanisms:', skippedMechanisms);
+console.log('  flows:     ', skippedFlows);
+console.log('  structures:', skippedStructures);
 EOF
-)" "$PROJECT_ROOT" "$TARGET_MECHANISMS" "$TARGET_FLOWS" "$APPLY_HEURISTICS"
+)" "$PROJECT_ROOT" "$TARGET_MECHANISMS" "$TARGET_FLOWS" "$TARGET_STRUCTURES" "$APPLY_HEURISTICS"
 ```
 
 If the resulting target list is empty, print a summary explaining why and exit cleanly. Suggest `--all` if the user wants to bypass the filter.
@@ -161,7 +195,7 @@ Use that output to drive the iteration. **Iterate over the remaining set in orde
 
 For target `i` (zero-indexed) of `N` remaining:
 
-1. **Look up the artifact** — open `mechanism-graph.json` (if `kind=mechanism`) or `domain-graph.json` (if `kind=flow`) and locate the record by id.
+1. **Look up the artifact** — open the appropriate graph file by kind (`mechanism-graph.json` / `domain-graph.json` / `structure-graph.json`) and locate the record by id.
 
 2. **Resolve participant nodes** — for each id in `participantNodeIds`, look it up in `knowledge-graph.json` and collect `{name, filePath, lineRange, summary, languageNotes, tags}`.
 
@@ -176,6 +210,7 @@ For target `i` (zero-indexed) of `N` remaining:
 7. **Attach** the validated walkthrough back into the host artifact:
    - Mechanisms: set `walkthrough` field on the matching mechanism in `mechanism-graph.json`.
    - Flows: upsert into `domain-graph.json`'s top-level `walkthroughs[]` array, keyed by `attachedTo.id`.
+   - Structures: set `walkthrough` field on the matching structure in `structure-graph.json`.
 
 8. **Mark done**: append the target's id to `walkthroughs-done.json`.
 

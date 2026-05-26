@@ -356,6 +356,7 @@ const DomainMetaSchema = z.object({
   crossDomainInteractions: z.array(z.string()).optional(),
   entryPoint: z.string().optional(),
   entryType: z.enum(["http", "cli", "event", "cron", "manual"]).optional(),
+  motivation: z.string().optional(),
 }).passthrough();
 
 const KnowledgeMetaSchema = z.object({
@@ -474,6 +475,7 @@ export const WalkthroughSceneSchema = z.object({
   codeExcerpt: z.object({
     path: z.string(),
     lineRange: z.tuple([z.number(), z.number()]),
+    outlineRanges: z.array(z.tuple([z.number(), z.number()])).optional(),
     highlightLine: z.number().optional(),
     language: z.string().optional(),
   }).optional(),
@@ -484,10 +486,11 @@ export const WalkthroughSceneSchema = z.object({
 export const WalkthroughSchema = z.object({
   version: z.literal("1"),
   attachedTo: z.object({
-    kind: z.enum(["flow", "mechanism"]),
+    kind: z.enum(["flow", "mechanism", "structure"]),
     id: z.string(),
   }),
-  shape: z.enum(["process", "recognition"]),
+  shape: z.enum(["process", "recognition", "structural"]),
+  motivation: z.string(),
   title: z.string(),
   subtitle: z.string(),
   opening: z.object({
@@ -508,6 +511,7 @@ export const MechanismSchema = z.object({
   id: z.string(),
   name: z.string(),
   kind: MechanismKindSchema,
+  motivation: z.string(),
   premise: z.string(),
   candidateRecognition: z.string(),
   participantNodeIds: z.array(z.string()),
@@ -524,6 +528,24 @@ export const MechanismGraphSchema = z.object({
   generatedAt: z.string(),
 }).passthrough();
 
+export const StructureSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  motivation: z.string(),
+  participantNodeIds: z.array(z.string()),
+  anchorNodeId: z.string().optional(),
+  worthWalkthrough: z.boolean(),
+  walkthrough: WalkthroughSchema.optional(),
+  tags: z.array(z.string()).optional(),
+}).passthrough();
+
+export const StructureGraphSchema = z.object({
+  version: z.string(),
+  project: ProjectMetaSchema,
+  structures: z.array(StructureSchema),
+  generatedAt: z.string(),
+}).passthrough();
+
 export const KnowledgeGraphSchema = z.object({
   version: z.string(),
   kind: z.enum(["codebase", "knowledge"]).optional(),
@@ -533,6 +555,7 @@ export const KnowledgeGraphSchema = z.object({
   layers: z.array(LayerSchema),
   tour: z.array(TourStepSchema),
   mechanisms: z.array(MechanismSchema).optional(),
+  structures: z.array(StructureSchema).optional(),
 });
 
 export interface GraphIssue {
@@ -776,6 +799,25 @@ export function validateGraph(data: unknown): ValidationResult {
     }
   }
 
+  // Optional: validate structures if present (drop broken individually)
+  const validStructures: z.infer<typeof StructureSchema>[] = [];
+  if (Array.isArray((fixed as Record<string, unknown>).structures)) {
+    const raw = (fixed as Record<string, unknown>).structures as unknown[];
+    for (let i = 0; i < raw.length; i++) {
+      const result = StructureSchema.safeParse(raw[i]);
+      if (result.success) {
+        validStructures.push(result.data);
+      } else {
+        issues.push({
+          level: "dropped",
+          category: "invalid-structure",
+          message: `structures[${i}]: ${result.error.issues[0]?.message ?? "validation failed"} — removed`,
+          path: `structures[${i}]`,
+        });
+      }
+    }
+  }
+
   const graph: z.infer<typeof KnowledgeGraphSchema> = {
     version: typeof fixed.version === "string" ? fixed.version : "1.0.0",
     project: projectResult.data,
@@ -784,6 +826,7 @@ export function validateGraph(data: unknown): ValidationResult {
     layers: validLayers,
     tour: validTour,
     ...(validMechanisms.length > 0 ? { mechanisms: validMechanisms } : {}),
+    ...(validStructures.length > 0 ? { structures: validStructures } : {}),
   };
 
   return { success: true, data: graph, issues, errors: buildErrors(issues) };

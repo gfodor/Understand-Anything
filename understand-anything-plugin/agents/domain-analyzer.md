@@ -68,7 +68,8 @@ Produce a JSON object with this exact structure:
       "complexity": "simple|moderate|complex",
       "domainMeta": {
         "entryPoint": "<trigger, e.g. POST /api/orders>",
-        "entryType": "http|cli|event|cron|manual"
+        "entryType": "http|cli|event|cron|manual",
+        "motivation": "<one sentence: why this flow matters to the user or to the system's design>"
       }
     },
     {
@@ -104,6 +105,9 @@ Produce a JSON object with this exact structure:
 6. **Be specific, not generic** — use the actual business terminology from the code
 7. **Don't invent flows that aren't in the code** — only document what exists
 8. **Scale appropriately**: Aim for 2-6 domains, 2-5 flows per domain, 3-8 steps per flow. Fewer is fine for small projects.
+9. **Every flow must have a motivation.** `domainMeta.motivation` is a single sentence answering *"why does this flow matter?"* — typically from the user's or product's perspective, but it can also be a technical reason ("this is the central read path; all keyspace reads bottleneck here, so latency tradeoffs are visible nowhere else"). If you cannot write a concrete one-sentence motivation for a flow, **drop the flow from the output**. The motivation field is a quality filter as much as it is a content field. A flow whose motivation amounts to "it does what its summary says" is plumbing, not a meaningful business flow, and should not be surfaced.
+   - Good motivation: *"The central path every read takes; latency tradeoffs in caching, connection handling, and dispatch are all visible here and nowhere else."*
+   - Bad motivation (drop the flow): *"This flow reads a key from the keyspace and returns its value."* — that's the summary, not the motivation.
 
 ## Critical Constraints
 

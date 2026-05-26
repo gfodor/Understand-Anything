@@ -39,6 +39,9 @@ const WalkthroughReader = lazy(() =>
 const MechanismsView = lazy(() =>
   import("./components/MechanismsView").then((m) => ({ default: m.MechanismsView })),
 );
+const StructuresView = lazy(() =>
+  import("./components/StructuresView").then((m) => ({ default: m.StructuresView })),
+);
 
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 const SESSION_TOKEN_KEY = "understand-anything-token";
@@ -115,6 +118,7 @@ function Dashboard({ accessToken }: { accessToken: string }) {
   const setGraph = useDashboardStore((s) => s.setGraph);
   const setDomainGraph = useDashboardStore((s) => s.setDomainGraph);
   const setMechanismGraph = useDashboardStore((s) => s.setMechanismGraph);
+  const setStructureGraph = useDashboardStore((s) => s.setStructureGraph);
   const setFlowWalkthroughs = useDashboardStore((s) => s.setFlowWalkthroughs);
   const setDiffOverlay = useDashboardStore((s) => s.setDiffOverlay);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -236,12 +240,27 @@ function Dashboard({ accessToken }: { accessToken: string }) {
         if (!data || typeof data !== "object") return;
         const d = data as Record<string, unknown>;
         if (!Array.isArray(d.mechanisms)) return;
-        // Minimal client-side validation. The skill validates with the
-        // full Zod schema before writing, so this is a defense-in-depth pass.
         setMechanismGraph(d as never);
       })
       .catch(() => {});
   }, [setMechanismGraph]);
+
+  // Structure graph — sibling artifact, separate schema, same pattern as
+  // mechanisms: fetched independently, absence is fine.
+  useEffect(() => {
+    fetch(dataUrl("structure-graph.json", accessToken))
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then((data: unknown) => {
+        if (!data || typeof data !== "object") return;
+        const d = data as Record<string, unknown>;
+        if (!Array.isArray(d.structures)) return;
+        setStructureGraph(d as never);
+      })
+      .catch(() => {});
+  }, [setStructureGraph]);
 
   return (
     <I18nProvider language={outputLanguage ?? "en"}>
@@ -296,6 +315,7 @@ function DashboardContent({
   const isKnowledgeGraph = useDashboardStore((s) => s.isKnowledgeGraph);
   const domainGraph = useDashboardStore((s) => s.domainGraph);
   const mechanismGraph = useDashboardStore((s) => s.mechanismGraph);
+  const structureGraph = useDashboardStore((s) => s.structureGraph);
   const layoutIssues = useDashboardStore((s) => s.layoutIssues);
   const isMobile = useIsMobile();
   const { t } = useI18n();
@@ -490,53 +510,69 @@ function DashboardContent({
           </h1>
           <div className="w-px h-5 bg-border-subtle hidden sm:block" />
           <PersonaSelector />
-          {graph && !isKnowledgeGraph && (domainGraph || mechanismGraph) && (
-            <>
-              <div className="w-px h-5 bg-border-subtle" />
-              <div className="flex items-center bg-elevated rounded-lg p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setViewMode("structural")}
-                  title={t.drawer.structural}
-                  className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                    viewMode === "structural"
-                      ? "bg-accent/20 text-accent"
-                      : "text-text-muted hover:text-text-secondary"
-                  }`}
-                >
-                  {t.drawer.structural}
-                </button>
-                {domainGraph && (
+          {graph &&
+            !isKnowledgeGraph &&
+            (domainGraph || mechanismGraph || structureGraph) && (
+              <>
+                <div className="w-px h-5 bg-border-subtle" />
+                <div className="flex items-center bg-elevated rounded-lg p-0.5">
                   <button
                     type="button"
-                    onClick={() => setViewMode("domain")}
-                    title={t.drawer.domain}
+                    onClick={() => setViewMode("structural")}
+                    title={t.drawer.structural}
                     className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                      viewMode === "domain"
+                      viewMode === "structural"
                         ? "bg-accent/20 text-accent"
                         : "text-text-muted hover:text-text-secondary"
                     }`}
                   >
-                    {t.drawer.domain}
+                    {t.drawer.structural}
                   </button>
-                )}
-                {mechanismGraph && (
-                  <button
-                    type="button"
-                    onClick={() => setViewMode("mechanisms")}
-                    title="Mechanisms"
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                      viewMode === "mechanisms"
-                        ? "bg-accent/20 text-accent"
-                        : "text-text-muted hover:text-text-secondary"
-                    }`}
-                  >
-                    Mechanisms
-                  </button>
-                )}
-              </div>
-            </>
-          )}
+                  {domainGraph && (
+                    <button
+                      type="button"
+                      onClick={() => setViewMode("domain")}
+                      title={t.drawer.domain}
+                      className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                        viewMode === "domain"
+                          ? "bg-accent/20 text-accent"
+                          : "text-text-muted hover:text-text-secondary"
+                      }`}
+                    >
+                      {t.drawer.domain}
+                    </button>
+                  )}
+                  {mechanismGraph && (
+                    <button
+                      type="button"
+                      onClick={() => setViewMode("mechanisms")}
+                      title="Mechanisms"
+                      className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                        viewMode === "mechanisms"
+                          ? "bg-accent/20 text-accent"
+                          : "text-text-muted hover:text-text-secondary"
+                      }`}
+                    >
+                      Mechanisms
+                    </button>
+                  )}
+                  {structureGraph && (
+                    <button
+                      type="button"
+                      onClick={() => setViewMode("structures")}
+                      title="Structures"
+                      className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                        viewMode === "structures"
+                          ? "bg-accent/20 text-accent"
+                          : "text-text-muted hover:text-text-secondary"
+                      }`}
+                    >
+                      Structures
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
         </div>
 
         {/* Middle — scrollable legends */}
@@ -699,6 +735,10 @@ function DashboardContent({
           ) : viewMode === "mechanisms" ? (
             <Suspense fallback={null}>
               <MechanismsView />
+            </Suspense>
+          ) : viewMode === "structures" ? (
+            <Suspense fallback={null}>
+              <StructuresView />
             </Suspense>
           ) : (
             <GraphView />
