@@ -306,13 +306,16 @@ function Opening({ walkthrough }: { walkthrough: Walkthrough }) {
   );
 }
 
-// Right-pane content: either a code excerpt OR a focal diagram. Per the
-// form's discipline (prose left, visuals right), focal diagrams live in
-// this pane alongside code excerpts — not inline with the prose. Beats
-// stay inline because they're narrative-interaction, not visualization.
-type RightPaneItem =
-  | { kind: "code"; key: string; excerpt: NonNullable<WalkthroughScene["codeExcerpt"]> }
-  | { kind: "focal"; key: string; focal: FocalPlaceholder };
+// Right-pane content: code excerpts AND focal diagrams are BOTH visuals
+// (form's discipline: prose left, visuals right). Beats stay inline on
+// the left because they're narrative-interaction, not visualization.
+//
+// When a scene has both a code excerpt and a focal diagram, the pane
+// splits into two tracks: diagram on top, code on bottom, each sharing
+// roughly half the pane height. When a scene has only one, that one
+// fills the whole pane. flex-basis transitions animate the split.
+type CodeItem = { key: string; excerpt: NonNullable<WalkthroughScene["codeExcerpt"]> };
+type FocalItem = { key: string; focal: FocalPlaceholder };
 
 function focalEmbedOf(scene: WalkthroughScene): FocalPlaceholder | null {
   return scene.embed && scene.embed.kind === "focal" ? scene.embed : null;
@@ -341,65 +344,80 @@ function ScenesWithStickyCode({
   const focalKey = (f: FocalPlaceholder) =>
     `focal::${f.template}::${hashString(f.parameters?.source ?? f.description ?? "")}`;
 
-  // Unique right-pane items across all scenes. Each scene contributes its
-  // focal embed (if any) — focal wins over code excerpt when both are
-  // present on the same scene, because the focal is the more specific
-  // authorial choice for the visual side of the page. If the author
-  // wanted code, they wouldn't have attached a focal here.
-  const uniqueItems = useMemo<RightPaneItem[]>(() => {
-    const seen = new Map<string, RightPaneItem>();
+  // Unique code excerpts across all scenes (deduped by path+range).
+  const uniqueCodeItems = useMemo<CodeItem[]>(() => {
+    const seen = new Map<string, CodeItem>();
     for (const scene of walkthrough.scenes) {
-      const focal = focalEmbedOf(scene);
-      if (focal) {
-        const k = focalKey(focal);
-        if (!seen.has(k)) seen.set(k, { kind: "focal", key: k, focal });
-      } else if (scene.codeExcerpt) {
-        const k = codeKey(scene.codeExcerpt);
-        if (!seen.has(k)) seen.set(k, { kind: "code", key: k, excerpt: scene.codeExcerpt });
-      }
+      if (!scene.codeExcerpt) continue;
+      const k = codeKey(scene.codeExcerpt);
+      if (!seen.has(k)) seen.set(k, { key: k, excerpt: scene.codeExcerpt });
     }
     return Array.from(seen.values());
   }, [walkthrough]);
 
-  // sceneId → item key. Same focal-wins-over-code rule.
-  const sceneToItemKey = useMemo(() => {
+  // Unique focal diagrams across all scenes (deduped by template+source-hash).
+  const uniqueFocalItems = useMemo<FocalItem[]>(() => {
+    const seen = new Map<string, FocalItem>();
+    for (const scene of walkthrough.scenes) {
+      const f = focalEmbedOf(scene);
+      if (!f) continue;
+      const k = focalKey(f);
+      if (!seen.has(k)) seen.set(k, { key: k, focal: f });
+    }
+    return Array.from(seen.values());
+  }, [walkthrough]);
+
+  // Per-scene maps (independent for code and focal).
+  const sceneToCodeKey = useMemo(() => {
     const m = new Map<string, string>();
     for (const scene of walkthrough.scenes) {
-      const focal = focalEmbedOf(scene);
-      if (focal) {
-        m.set(scene.id, focalKey(focal));
-      } else if (scene.codeExcerpt) {
-        m.set(scene.id, codeKey(scene.codeExcerpt));
-      }
+      if (scene.codeExcerpt) m.set(scene.id, codeKey(scene.codeExcerpt));
     }
     return m;
   }, [walkthrough]);
 
-  const resolveItemForScene = useCallback(
+  const sceneToFocalKey = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const scene of walkthrough.scenes) {
+      const f = focalEmbedOf(scene);
+      if (f) m.set(scene.id, focalKey(f));
+    }
+    return m;
+  }, [walkthrough]);
+
+  // Code track falls back to the nearest preceding scene's excerpt so
+  // prose-only scenes don't blank the bottom of the pane. Focal track
+  // does NOT fall back — a diagram from a previous scene lingering on
+  // an unrelated scene reads as wrong. Focal shows only when the
+  // current scene explicitly has one.
+  const resolveCodeKeyForScene = useCallback(
     (sceneId: string | null): string | null => {
       if (!sceneId) return null;
-      const direct = sceneToItemKey.get(sceneId);
+      const direct = sceneToCodeKey.get(sceneId);
       if (direct) return direct;
-      // Fall back to the most recent preceding scene's right-pane item.
       const scenes = walkthrough.scenes;
       const idx = scenes.findIndex((s) => s.id === sceneId);
       for (let i = idx - 1; i >= 0; i--) {
-        const k = sceneToItemKey.get(scenes[i].id);
+        const k = sceneToCodeKey.get(scenes[i].id);
         if (k) return k;
       }
-      return uniqueItems[0]?.key ?? null;
+      return uniqueCodeItems[0]?.key ?? null;
     },
-    [sceneToItemKey, walkthrough.scenes, uniqueItems]
+    [sceneToCodeKey, walkthrough.scenes, uniqueCodeItems]
+  );
+
+  const resolveFocalKeyForScene = useCallback(
+    (sceneId: string | null): string | null => {
+      if (!sceneId) return null;
+      return sceneToFocalKey.get(sceneId) ?? null;
+    },
+    [sceneToFocalKey]
   );
 
   const [files, setFiles] = useState<Record<string, FetchState>>({});
   useEffect(() => {
     const paths = Array.from(
-      new Set(
-        uniqueItems
-          .filter((item): item is Extract<RightPaneItem, { kind: "code" }> => item.kind === "code")
-          .map((item) => item.excerpt.path),
-      ),
+      new Set(uniqueCodeItems.map((item) => item.excerpt.path)),
     );
     let cancelled = false;
     for (const p of paths) {
@@ -442,7 +460,7 @@ function ScenesWithStickyCode({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uniqueItems]);
+  }, [uniqueCodeItems]);
 
   const sceneRefs = useRef<Map<string, HTMLElement | null>>(new Map());
   const [scrollSceneId, setScrollSceneId] = useState<string | null>(
@@ -451,7 +469,8 @@ function ScenesWithStickyCode({
   const [hoverSceneId, setHoverSceneId] = useState<string | null>(null);
   const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
   const activeSceneId = hoverSceneId ?? scrollSceneId;
-  const activeItemKey = resolveItemForScene(activeSceneId);
+  const activeCodeKey = resolveCodeKeyForScene(activeSceneId);
+  const activeFocalKey = resolveFocalKeyForScene(activeSceneId);
 
   const observeScene = useCallback((id: string, el: HTMLElement | null) => {
     if (el) sceneRefs.current.set(id, el);
@@ -493,7 +512,9 @@ function ScenesWithStickyCode({
       style={{
         display: "grid",
         gridTemplateColumns:
-          uniqueItems.length > 0 ? "minmax(0, 1fr) minmax(0, 1.3fr)" : "1fr",
+          uniqueCodeItems.length + uniqueFocalItems.length > 0
+            ? "minmax(0, 1fr) minmax(0, 1.3fr)"
+            : "1fr",
         columnGap: "44px",
         padding: "20px 56px 20px",
       }}
@@ -515,10 +536,12 @@ function ScenesWithStickyCode({
           />
         ))}
       </div>
-      {uniqueItems.length > 0 && (
+      {(uniqueCodeItems.length + uniqueFocalItems.length) > 0 && (
         <StickyRightPane
-          items={uniqueItems}
-          activeItemKey={activeItemKey}
+          codeItems={uniqueCodeItems}
+          focalItems={uniqueFocalItems}
+          activeCodeKey={activeCodeKey}
+          activeFocalKey={activeFocalKey}
           files={files}
           hoveredSymbol={hoveredSymbol}
         />
@@ -657,16 +680,32 @@ function SceneProse({
 }
 
 function StickyRightPane({
-  items,
-  activeItemKey,
+  codeItems,
+  focalItems,
+  activeCodeKey,
+  activeFocalKey,
   files,
   hoveredSymbol,
 }: {
-  items: RightPaneItem[];
-  activeItemKey: string | null;
+  codeItems: CodeItem[];
+  focalItems: FocalItem[];
+  activeCodeKey: string | null;
+  activeFocalKey: string | null;
   files: Record<string, FetchState>;
   hoveredSymbol: string | null;
 }) {
+  const focalActive = activeFocalKey !== null;
+  const codeActive = activeCodeKey !== null;
+  // Track sizes:
+  //   both active   → 45% focal / 55% code (give the code a bit more room
+  //                   since prose tends to anchor on it more often)
+  //   only focal    → focal 100%, code 0%
+  //   only code     → code 100%, focal 0%
+  //   neither       → both 0% (rare; pane mostly empty)
+  // flex-basis transitions animate the redistribution smoothly.
+  const focalBasis = focalActive ? (codeActive ? "45%" : "100%") : "0%";
+  const codeBasis = codeActive ? (focalActive ? "55%" : "100%") : "0%";
+
   return (
     <aside>
       <div
@@ -680,30 +719,63 @@ function StickyRightPane({
           borderRadius: "6px",
           overflow: "hidden",
           boxShadow: "inset 0 0 0 1px rgba(212, 165, 116, 0.02)",
+          display: "flex",
+          flexDirection: "column",
         }}
       >
-        {items.map((item) => {
-          const isActive = item.key === activeItemKey;
-          if (item.kind === "code") {
-            const fileState = files[item.excerpt.path];
-            return (
-              <ExcerptStack
+        {focalItems.length > 0 && (
+          <div
+            style={{
+              flexGrow: 0,
+              flexShrink: 0,
+              flexBasis: focalBasis,
+              minHeight: 0,
+              overflow: "hidden",
+              position: "relative",
+              borderBottom:
+                focalActive && codeActive
+                  ? "1px solid var(--color-border-subtle)"
+                  : "none",
+              transition:
+                "flex-basis 600ms cubic-bezier(0.16, 1, 0.3, 1), border-color 600ms ease",
+            }}
+          >
+            {focalItems.map((item) => (
+              <FocalStack
                 key={item.key}
-                excerpt={item.excerpt}
-                fileState={fileState}
-                isActive={isActive}
-                hoveredSymbol={hoveredSymbol}
+                focal={item.focal}
+                isActive={item.key === activeFocalKey}
               />
-            );
-          }
-          return (
-            <FocalStack
-              key={item.key}
-              focal={item.focal}
-              isActive={isActive}
-            />
-          );
-        })}
+            ))}
+          </div>
+        )}
+        {codeItems.length > 0 && (
+          <div
+            style={{
+              flexGrow: 0,
+              flexShrink: 0,
+              flexBasis: codeBasis,
+              minHeight: 0,
+              overflow: "hidden",
+              position: "relative",
+              transition:
+                "flex-basis 600ms cubic-bezier(0.16, 1, 0.3, 1)",
+            }}
+          >
+            {codeItems.map((item) => {
+              const fileState = files[item.excerpt.path];
+              return (
+                <ExcerptStack
+                  key={item.key}
+                  excerpt={item.excerpt}
+                  fileState={fileState}
+                  isActive={item.key === activeCodeKey}
+                  hoveredSymbol={hoveredSymbol}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
     </aside>
   );
@@ -716,9 +788,6 @@ function FocalStack({
   focal: FocalPlaceholder;
   isActive: boolean;
 }) {
-  // Only Mermaid-backed templates render. The other templates declared
-  // in the schema (data-structure, metric-strip) and simulations are
-  // intentionally skipped — no placeholder, just nothing.
   const isMermaid = MERMAID_TEMPLATES.includes(focal.template);
   const source = focal.parameters?.source;
   return (
@@ -740,7 +809,7 @@ function FocalStack({
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          padding: "12px 18px",
+          padding: "10px 18px",
           borderBottom: "1px solid var(--color-border-subtle)",
           background: "var(--color-elevated)",
           fontFamily: "var(--font-mono)",
@@ -759,10 +828,10 @@ function FocalStack({
           flex: 1,
           minHeight: 0,
           overflow: "auto",
-          padding: "20px 24px",
+          padding: "12px 16px",
           display: "flex",
           flexDirection: "column",
-          gap: "16px",
+          gap: "10px",
         }}
       >
         {focal.description && (
@@ -771,15 +840,25 @@ function FocalStack({
               margin: 0,
               fontStyle: "italic",
               color: "var(--color-text-secondary)",
-              fontSize: "0.9rem",
-              lineHeight: 1.5,
+              fontSize: "0.85rem",
+              lineHeight: 1.45,
+              flexShrink: 0,
             }}
           >
             {focal.description}
           </p>
         )}
         {isMermaid && source ? (
-          <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: "flex",
+              alignItems: "stretch",
+              justifyContent: "center",
+              overflow: "hidden",
+            }}
+          >
             <MermaidDiagram source={source} />
           </div>
         ) : (
@@ -1149,12 +1228,19 @@ function MermaidDiagram({ source }: { source: string }) {
         const { svg } = await mermaid.render(idRef.current, source);
         if (!cancelled && ref.current) {
           ref.current.innerHTML = svg;
-          // Make the SVG fit the container width
           const svgEl = ref.current.querySelector("svg");
           if (svgEl) {
-            svgEl.setAttribute("width", "100%");
+            // Let the SVG scale uniformly into whatever space the container
+            // gives us — both width AND height. Without removing the
+            // mermaid-emitted width/height attrs, the SVG sticks to its
+            // intrinsic pixel size and appears small in a tall track.
+            svgEl.removeAttribute("width");
+            svgEl.removeAttribute("height");
+            svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
+            svgEl.style.width = "100%";
+            svgEl.style.height = "100%";
             svgEl.style.maxWidth = "100%";
-            svgEl.style.height = "auto";
+            svgEl.style.maxHeight = "100%";
             svgEl.style.display = "block";
           }
         }
@@ -1191,10 +1277,12 @@ function MermaidDiagram({ source }: { source: string }) {
     <div
       ref={ref}
       style={{
+        width: "100%",
+        height: "100%",
         display: "flex",
+        alignItems: "center",
         justifyContent: "center",
-        padding: "8px 0",
-        minHeight: "60px",
+        minHeight: 0,
         // Inherits text color so SVG strokes that use currentColor pick it up
         color: "var(--color-text-primary)",
       }}
